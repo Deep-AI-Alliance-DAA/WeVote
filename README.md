@@ -8,7 +8,7 @@ Create an event, share one voting link or QR code, and display the results. WeVo
 
 **Public source:** [Deep-AI-Alliance-DAA/WeVote](https://github.com/Deep-AI-Alliance-DAA/WeVote).
 
-[香港廣東話指南](docs/README.zh-HK.md) · [Deployment](docs/DEPLOYMENT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[香港廣東話指南](docs/README.zh-HK.md) · [Deployment](docs/DEPLOYMENT.md) · [Organizer sign-in](docs/ORGANIZER_AUTH.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 The source is licensed under [MIT](LICENSE).
 
@@ -22,6 +22,7 @@ WeVote takes inspiration from Keith Li's emphasis on shared caching and reducing
 
 - Independent events with 2–20 options, drafts, preview, publication, and scheduled opening/closing.
 - Owner, administrator, and organizer roles; individual login keys and event assignments.
+- Optional public organizer registration through Google or Apple, with a bounded trial event.
 - Event content editing before voting begins; organizer text, HTTPS logo/cover images, and four color themes.
 - A link and QR code for each event, downloadable QR artwork, and sharing tools for WhatsApp, Facebook, X, and Instagram workflows.
 - Live results or results revealed after closing, charts, percentages, and fullscreen display.
@@ -35,6 +36,19 @@ WeVote takes inspiration from Keith Li's emphasis on shared caching and reducing
 | `/results.html?event=<id>` | Results dashboard and reports |
 
 The current interface uses Hong Kong Cantonese. Admin times are shown in Hong Kong time (UTC+8), and reports identify their timezone. Legacy event and signed-ticket links continue to redirect to the voting page.
+
+## Public organizer trial
+
+When an operator configures Google or Apple sign-in, a visitor can register from the home/admin page and manage their own event. Each self-registered organizer account receives **one lifetime event, including a draft**, **up to 10,000 recorded valid votes**, and a **maximum 24-hour voting period**. Creating a draft consumes the event allowance; publication, closing, logout, and repeat sign-in do not reset it. The server enforces creation reservations, duration, and the atomic vote cap. Retrying an already recorded choice remains safe at the cap.
+
+| Account | Event creation | Vote storage |
+| --- | --- | --- |
+| Public Google/Apple organizer | One lifetime event, including a draft; up to 24 hours | Up to 10,000 valid votes in its EventCoordinator |
+| Owner, admin, or existing key-based organizer | No public-trial creation quota; normal permissions and event validation apply | Existing 128-shard storage; no trial vote cap |
+
+Google and Apple are independently configured and unavailable until their credentials are installed. See [organizer sign-in setup](docs/ORGANIZER_AUTH.md). Provider identities are separate app accounts; the app does not merge accounts by email or establish one account per person. Voters still use the public voting link and Turnstile.
+
+The 10,000-vote allowance is a storage limit. Simultaneous 10,000-person voting capacity has not been established by a burst test. Operator hosting costs still depend on platform usage. Payments, subscriptions, and Stripe integration are not implemented.
 
 ## What counts as one vote
 
@@ -66,7 +80,7 @@ npm run test:setup  # Offline setup/deployment-helper checks only
 npm run test:startup  # Offline test-runner startup/cleanup checks only
 ```
 
-`npm test` runs syntax, cache, setup, startup, and integration checks. It starts and stops a disposable local Worker with temporary keys/storage, without using a Cloudflare login or your existing `.dev.vars`. Integration voting checks require outbound HTTPS to Turnstile's test verification service. These are functional checks, not a capacity test.
+`npm test` runs syntax, cache, setup, asset, startup, and integration checks. It starts and stops a disposable local Worker with temporary keys/storage, without using a Cloudflare login or your existing `.dev.vars`. Integration voting checks require outbound HTTPS to Turnstile's test verification service. The trial ballot unit suite uses real SQLite to check the actual 10,000-vote boundary, transaction rollback, durable retries, and exports. These are functional checks; burst capacity requires separate measurement.
 
 For targeted checks against your own local dev server:
 
@@ -113,19 +127,20 @@ The normal public build contains the reusable project artwork. The explicit flag
 ```text
 Cloudflare Pages: static home, admin, voting, and results pages
   /api/* -> Pages Function -> private API Worker via Service Binding
-    |-- AdminDirectory: accounts, sessions, roles, and event grants
-    |-- EventCoordinator: event content/settings and shared result aggregation
-    |-- 128 VoteShard instances per event: SQLite Durable Objects
+    |-- AdminDirectory: accounts, OAuth identities/flows, sessions, roles, grants, and trial creation reservations
+    |-- EventCoordinator: authoritative content/settings and shared results
+    |     `-- Public trial: local SQLite votes/counters with an atomic 10,000-vote cap
+    |-- Staff/key-created events: 128 VoteShard instances per event
     `-- EVENTS KV: eventually consistent event catalog
 ```
 
-Static routes avoid Function execution. Public results use short caches at Pages and the coordinator, and concurrent readers share one aggregation across the shards. Event configuration is authoritative in the coordinator; catalog publishing retries with alarms. The API Worker has no public `workers.dev` endpoint in this configuration.
+Static routes avoid Function execution. Public results use short caches at Pages and the coordinator. Staff-event readers share one aggregation across the vote shards. Trial results read counters in the event coordinator, so polling a trial does not fan out to 128 vote shards. Trial exports preserve the existing partition/cursor API. Event configuration is authoritative in the coordinator; catalog publishing retries with alarms. The API Worker has no public `workers.dev` endpoint in this configuration.
 
 ## Cost and capacity
 
 Cloudflare's free Workers/Pages Functions allowance is 100,000 dynamic requests per day. Workers Paid starts at US$5 per month and includes monthly request/CPU allowances; Durable Objects and KV have their own metered usage and allowances. **US$5 is not a guaranteed total monthly bill.** Verify current [Workers](https://developers.cloudflare.com/workers/platform/pricing/), [Durable Objects](https://developers.cloudflare.com/durable-objects/platform/pricing/), and [KV](https://developers.cloudflare.com/kv/platform/pricing/) pricing for your account.
 
-Durable Objects Free also has a separate **100,000-request daily limit**, shared across the account. Each full result aggregation can read all 128 vote shards; one result request is not one Durable Object request. Continuous three-second dashboards can exhaust this quota even with few viewers. Use Workers Paid for sustained live voting. When a free allowance is exhausted, storage-backed voting/admin APIs can return 503 until the limit resets at 00:00 UTC (08:00 Hong Kong time) or the account is upgraded.
+Durable Objects Free also has a separate **100,000-request daily limit**, shared across the account. A full staff-event result aggregation can read all 128 vote shards; one result request is not one Durable Object request. Trial ballots use local coordinator counters, reducing this fan-out, while account creation, identities, submissions, result reads, SQL writes, and exports still consume platform resources. Continuous dashboards can exhaust free allowances. Use Workers Paid for sustained live voting. When an allowance is exhausted, storage-backed voting/admin APIs can return 503 until its reset or the account is upgraded. [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 
 **A 50,000-user simultaneous voting event has not been validated by a production burst test.** Sharding and caching are design choices, not evidence of a capacity guarantee. Result polling, event duration, retries, cold starts, exports, and tests affect usage. For example, 50,000 viewers polling every three seconds for ten minutes produce about ten million result requests before identity and vote submissions.
 
@@ -133,7 +148,7 @@ Before a large event, measure burst entry and submission success, duplicate hand
 
 ## Privacy and administration
 
-The application stores hashed browser/ticket identifiers, choices, and timestamps. Public results expose aggregates; authorized per-vote exports contain pseudonymous identifiers and timestamps and need a retention policy. Cloudflare handles hosting and verification traffic under its own service terms.
+The application stores hashed browser/ticket identifiers, choices, and timestamps. Organizer registration additionally stores the provider and its stable subject identifier, display name, role, and quota reservation. Provider passwords are never collected, and provider access/refresh tokens are not retained. Public results expose aggregates; authorized per-vote exports contain pseudonymous identifiers and timestamps and need a retention policy. Cloudflare and enabled identity providers handle their respective traffic under their service terms.
 
 Share only the event URL or QR code. Keep owner and account login keys private. Admin sessions use HttpOnly cookies and expire after eight hours; disabling a named account or rotating its key revokes its sessions. Rotating the owner key does not invalidate existing owner sessions; they remain valid until their eight-hour expiry. Use one canonical public hostname so voting cookies are consistent.
 
@@ -143,6 +158,7 @@ The WeVote project credits are **[DAA.HK](https://daa.hk/), Hillman Tam and Keit
 
 - **Technical inspiration:** [Keith Li's HK Traffic Intelligence](https://github.com/keithligh/hk-traffic-intelligence) documents serving shared, cached feed copies on Cloudflare and refreshing them at intervals. This informed WeVote's emphasis on shared caching and economical operation.
 - **QR generation:** `qrcode-generator` 2.0.4 by Kazuhiko Arase is bundled under MIT. Preserve the complete upstream notice in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **JWT/JWK cryptography:** `jose` 6.2.12 by Filip Skokan is used for organizer OAuth verification and Apple client assertions under MIT; its complete license is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - **Visual inspiration:** [Streamline Freehand](https://www.streamlinehq.com/icons/freehand-sets) informed the hand-drawn direction. WeVote's AI-assisted illustration and project SVG drawings are distributed under MIT; no Streamline assets were copied or vendored.
 
 WeVote is licensed under the [MIT License](LICENSE). Retain its copyright and license notice when redistributing. Event posters and organizer logos supplied for a deployment retain their respective rights and permissions.

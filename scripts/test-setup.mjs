@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Run only temporary helper copies and an offline Wrangler stub.
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -135,11 +136,20 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd:
     { ...productionSecrets, ADMIN_EXPORT_KEY: productionSecrets.ADMIN_DASHBOARD_KEY },
     { ...productionSecrets, TURNSTILE_SITE_KEY: `1x${"0".repeat(25)}` },
     { ...productionSecrets, TURNSTILE_SECRET_KEY: `2x${"0".repeat(25)}` },
+    { ...productionSecrets, GOOGLE_CLIENT_ID: "fixture-web-client" },
+    { ...productionSecrets, GOOGLE_CLIENT_ID: "fixture-web-client", GOOGLE_CLIENT_SECRET: "" },
+    { ...productionSecrets, APPLE_SERVICE_ID: "hk.fixture.wevote" },
+    { ...productionSecrets, APPLE_SERVICE_ID: "hk.fixture.wevote", APPLE_TEAM_ID: "ABCDEFGHIJ", APPLE_KEY_ID: "KLMNOPQRST", APPLE_PRIVATE_KEY: malformedMarker },
   ]) {
     await writeJson(generated[2], badSecrets);
     await rejectDeploy(["api", "--dry-run"], "Invalid or reused deployment credentials are rejected");
   }
-  await writeJson(generated[2], productionSecrets);
+  const providerSecrets = {
+    ...productionSecrets, GOOGLE_CLIENT_ID: "fixture-web-client", GOOGLE_CLIENT_SECRET: "fixture-google-private-credential",
+    APPLE_SERVICE_ID: "hk.fixture.wevote", APPLE_TEAM_ID: "ABCDEFGHIJ", APPLE_KEY_ID: "KLMNOPQRST",
+    APPLE_PRIVATE_KEY: generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" }),
+  };
+  await writeJson(generated[2], providerSecrets);
   for (const accountId of [worker.account_id, "c".repeat(32)]) {
     await writeJson(generated[1], { ...pages, account_id: accountId });
     await rejectDeploy(["api", "--dry-run"], "An unsupported Pages account_id is rejected before API deployment");
@@ -179,7 +189,7 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd:
   check(trace[2].account === worker.account_id, "Pages deployment overrides an inherited account with the configured account");
   check(trace.filter((entry) => entry.kind === "wrangler").every((entry) => entry.metrics === "false"), "Wrangler telemetry is disabled");
   const invocationLog = JSON.stringify(trace);
-  check([...privateKeys, productionSecrets.TURNSTILE_SECRET_KEY].every((value) => !invocationLog.includes(value)), "Private credentials never appear in command arguments");
+  check([...privateKeys, productionSecrets.TURNSTILE_SECRET_KEY, providerSecrets.GOOGLE_CLIENT_SECRET, providerSecrets.APPLE_PRIVATE_KEY].every((value) => !invocationLog.includes(value)), "Private credentials never appear in command arguments");
   check(run("deploy-cloudflare.mjs", ["pages", "--with-private-assets"]).status === 0, "Private-asset Pages deployment reaches only offline stubs");
   const privateTrace = (await readTrace()).slice(trace.length);
   check(privateTrace.length === 2 && privateTrace[0].kind === "build" && privateTrace[1].kind === "wrangler", "Private-asset build runs before deployment");

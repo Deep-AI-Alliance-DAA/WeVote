@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createPrivateKey } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +63,27 @@ try {
     for (const name of ["TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY"]) {
       if (typeof secrets[name] !== "string" || !/^[a-zA-Z0-9_-]{20,100}$/.test(secrets[name]) || /^[123]x/.test(secrets[name]) || /replace|example|change.?me/i.test(secrets[name])) {
         throw new Error(`${name} needs a real production Turnstile key. Testing keys are not accepted for deployment.`);
+      }
+    }
+    // Providers are optional. Reject partial groups instead of silently
+    // deploying a registration button whose backend cannot authenticate.
+    for (const names of [
+      ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+      ["APPLE_SERVICE_ID", "APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"],
+    ]) {
+      if (!names.some((name) => secrets[name] !== undefined && secrets[name] !== "")) continue;
+      for (const name of names) {
+        const maximum = { APPLE_PRIVATE_KEY: 16_384, APPLE_SERVICE_ID: 256, APPLE_TEAM_ID: 64, APPLE_KEY_ID: 64, GOOGLE_CLIENT_SECRET: 4096, GOOGLE_CLIENT_ID: 1024 }[name];
+        if (typeof secrets[name] !== "string" || !secrets[name].trim() || secrets[name].length > maximum || /replace|example|change.?me/i.test(secrets[name])) {
+          throw new Error(`${name} is missing or invalid. Supply the complete provider group, or omit it to keep that provider disabled.`);
+        }
+      }
+      if (names[0] === "APPLE_SERVICE_ID") {
+        let key;
+        try { key = createPrivateKey(secrets.APPLE_PRIVATE_KEY.replace(/\\n/g, "\n")); } catch { /* Filename-only error below. */ }
+        if (key?.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") {
+          throw new Error("APPLE_PRIVATE_KEY must be the Sign in with Apple P-256 private key; its contents are never included in errors.");
+        }
       }
     }
     await run([wrangler, "deploy", "--config", "wrangler.worker.local.jsonc", "--secrets-file", ".env.production.json", ...(dryRun ? ["--dry-run", "--outdir", ".cloudflare/dry-run"] : [])], root, worker.account_id);

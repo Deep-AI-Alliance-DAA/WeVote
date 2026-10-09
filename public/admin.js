@@ -13,6 +13,10 @@ let accounts = [];
 let accountsLoaded = false;
 let shareTools = [];
 let loginBusy = false;
+let creationQuota = null;
+let creationBusy = false;
+let pendingCreation = null;
+const pendingCreationKey = "wevote-pending-event";
 
 function note(id, value, kind = "") {
   const element = $(id);
@@ -50,6 +54,9 @@ function clearSession() {
   pendingRequests.forEach((controller) => controller.abort());
   pendingRequests.clear();
   principal = null;
+  creationQuota = null;
+  creationBusy = false;
+  clearPendingCreation();
   knownEvents = [];
   accounts = [];
   accountsLoaded = false;
@@ -95,6 +102,9 @@ async function api(path, options = {}) {
       }
       const error = new Error(data.error || "請稍後再試。");
       error.status = response.status;
+      error.code = data.code;
+      error.creationQuota = data.creationQuota;
+      error.principal = data.principal;
       throw error;
     }
     return data;
@@ -103,6 +113,75 @@ async function api(path, options = {}) {
 
 function send(path, method, body) {
   return api(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+
+function clearPendingCreation() {
+  pendingCreation = null;
+  try { sessionStorage.removeItem(pendingCreationKey); } catch { /* Retry still works in memory. */ }
+}
+
+function rememberPendingCreation(payload) {
+  pendingCreation = { accountId: principal.id, requestId: crypto.randomUUID(), payload: JSON.stringify(payload) };
+  try { sessionStorage.setItem(pendingCreationKey, JSON.stringify(pendingCreation)); } catch { /* Retry still works in memory. */ }
+}
+
+function restorePendingCreation() {
+  if (!creationQuota) return;
+  if (creationQuota.limit !== 1) { clearPendingCreation(); return; }
+  if (pendingCreation) return;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(pendingCreationKey) || "null");
+    if (!saved) return;
+    const payload = JSON.parse(saved.payload);
+    if (saved.accountId !== principal.id || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(saved.requestId)
+      || typeof payload.name !== "string" || payload.name.length > 100 || typeof payload.question !== "string" || payload.question.length > 300
+      || !Array.isArray(payload.options) || payload.options.length < 2 || payload.options.length > 20
+      || payload.options.some((option) => typeof option !== "string" || option.length > 200)
+      || !Number.isFinite(Date.parse(payload.opensAt)) || !Number.isFinite(Date.parse(payload.closesAt))
+      || !["draft", "published"].includes(payload.lifecycle) || !["live", "after-close"].includes(payload.resultsVisibility)) {
+      clearPendingCreation();
+      return;
+    }
+    pendingCreation = saved;
+    $("event-name").value = payload.name;
+    $("event-question").value = payload.question;
+    $("event-options").value = payload.options.join("\n");
+    $("save-draft").checked = payload.lifecycle === "draft";
+    $("open-now").checked = false;
+    $("opens-at").value = hkInput(new Date(payload.opensAt));
+    $("closes-at").value = hkInput(new Date(payload.closesAt));
+    $("results-visibility").value = payload.resultsVisibility;
+    syncCreateTiming();
+    note("create-message", "上次建立未確認完成。重試會提交同一份內容，唔會另開一場活動。", "bad");
+  } catch { clearPendingCreation(); }
+}
+
+function syncCreateAvailability() {
+  const limited = creationQuota?.limit === 1;
+  const used = limited && creationQuota.used >= 1;
+  const unknown = principal?.selfRegistered === true && principal.role === "organizer" && !creationQuota;
+  const retry = Boolean(pendingCreation && limited);
+  $("create-fields").disabled = !principal || creationBusy || retry || used || unknown;
+  $("create-button").disabled = !principal || creationBusy || used || unknown;
+  $("create-button").hidden = retry;
+  $("retry-create-button").hidden = !retry;
+  $("retry-create-button").disabled = !principal || creationBusy;
+  $("event-form").setAttribute("aria-busy", String(creationBusy));
+  $("creation-quota").hidden = !limited && !unknown;
+  $("quota-event-link").hidden = !used;
+  if (!limited && !unknown) return;
+  $("creation-quota-title").textContent = unknown ? "正在確認免費試用配額…" : used ? "免費活動配額已使用 · 1 / 1" : "免費試用 · 可建立 1 個活動";
+  $("creation-quota-message").textContent = used
+    ? "你仍然可以編輯、發佈同分享已有活動。每個帳戶只有一個免費活動，儲存草稿亦計入配額。"
+    : "最多 10,000 張有效投票，投票期間最長 24 小時。儲存草稿亦會使用活動配額。";
+}
+
+function setCreationQuota(value) {
+  creationQuota = value?.limit === 1 && [0, 1].includes(value.used)
+    ? { limit: 1, used: value.used, eventId: value.eventId || null }
+    : value?.limit === null || !principal?.selfRegistered || principal.role !== "organizer"
+      ? { limit: null, used: 0, eventId: null } : null;
+  syncCreateAvailability();
 }
 
 function hkInput(date) {
@@ -133,6 +212,7 @@ function syncCreateTiming() {
   $("opens-at").required = !immediate;
   $("draft-help").hidden = !draft;
   $("create-button").textContent = draft ? "儲存草稿 ↗" : "建立 event ↗";
+  syncCreateAvailability();
 }
 
 function hkTime(value) {
@@ -474,21 +554,8 @@ function renderEvents(events) {
 
 async function loadEvents() {
   const data = await api("/api/admin/events");
-  if (data.principal) {
-    if (principal && (principal.id !== data.principal.id || principal.role !== data.principal.role)) {
-      // A different tab may have changed the shared cookie session or role.
-      // Discard cached records before adopting the newly authenticated user.
-      clearSession();
-      setPrincipal(data.principal);
-      $("login-panel").hidden = true;
-      $("dashboard").hidden = false;
-      if (principal.role === "owner") {
-        try { await loadAccounts(); }
-        catch (error) { if (!cancelled(error)) note("accounts-message", error.message, "bad"); }
-      }
-      if (!principal) return;
-    } else setPrincipal(data.principal);
-  }
+  const version = await adoptResponsePrincipal(data);
+  if (version === null || stale(version)) return;
   publicBaseUrl = data.publicBaseUrl || location.origin;
   const byId = new Map(data.events.map((event) => [event.id, event]));
   for (const [id, event] of justCreated) {
@@ -496,14 +563,44 @@ async function loadEvents() {
     else byId.set(id, event);
   }
   renderEvents([...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  if (pendingCreation && creationQuota?.used === 1 && byId.has(creationQuota.eventId)) {
+    clearPendingCreation();
+    $("event-form").reset();
+    resetEventTimes();
+    note("create-message", "你嘅免費活動已喺下方列出，可以繼續管理。", "good");
+  }
   note("events-message", data.hasMore ? "活動數量較多，目前只顯示部分活動。" : "");
 }
 
-function setPrincipal(value) {
+function setPrincipal(value, quota) {
   principal = value;
   $("current-user-name").textContent = value.name;
-  $("current-user-role").textContent = roleLabels[value.role] || "管理帳戶";
   $("accounts-panel").hidden = value.role !== "owner";
+  setCreationQuota(quota);
+  $("current-user-role").textContent = value.role === "organizer" && creationQuota?.limit === 1 ? "主辦方 · 免費試用" : roleLabels[value.role] || "管理帳戶";
+  restorePendingCreation();
+}
+
+async function adoptResponsePrincipal(data, creating = false) {
+  const changed = data.principal && principal && (principal.id !== data.principal.id
+    || principal.role !== data.principal.role || Boolean(principal.selfRegistered) !== Boolean(data.principal.selfRegistered));
+  if (changed) {
+    // Cookie sessions are shared between tabs. Never carry an old account's
+    // records or unconfirmed create request into the newly authenticated one.
+    clearSession();
+    $("login-panel").hidden = true;
+    $("dashboard").hidden = false;
+    $("retry-logout").hidden = true;
+    note("login-message", "");
+  }
+  if (data.principal) setPrincipal(data.principal, data.creationQuota);
+  if (creating) { creationBusy = true; syncCreateAvailability(); }
+  const version = sessionVersion;
+  if (changed && principal?.role === "owner") {
+    try { await loadAccounts(); }
+    catch (error) { if (!cancelled(error) && !stale(version)) note("accounts-message", error.message, "bad"); }
+  }
+  return principal && !stale(version) ? version : null;
 }
 
 function showAccountKey(account, key) {
@@ -577,8 +674,8 @@ async function loadAccounts() {
   renderAccounts();
 }
 
-async function openDashboard(value) {
-  setPrincipal(value);
+async function openDashboard(value, quota) {
+  setPrincipal(value, quota);
   $("login-panel").hidden = true;
   $("dashboard").hidden = false;
   $("retry-logout").hidden = true;
@@ -607,7 +704,7 @@ async function login(key) {
   note("login-message", "正在登入…");
   try {
     const data = await send("/api/admin/login", "POST", { key: key.trim() });
-    await openDashboard(data.principal);
+    await openDashboard(data.principal, data.creationQuota);
   } catch (error) {
     if (!cancelled(error)) note("login-message", error.message, "bad");
   } finally { if (!stale(version)) setLoginBusy(false); }
@@ -636,6 +733,75 @@ $("login-form").addEventListener("submit", (event) => {
   $("admin-key").value = "";
   void login(key);
 });
+
+async function submitEvent() {
+  if (!principal || creationBusy) return;
+  let version = sessionVersion;
+  let payload;
+  try {
+    if (pendingCreation) {
+      payload = JSON.parse(pendingCreation.payload);
+    } else {
+      if (!creationQuota || (creationQuota.limit === 1 && creationQuota.used >= 1)) return;
+      const options = $("event-options").value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      if (options.length < 2 || options.length > 20) throw new Error("請填 2–20 個選項，每行一項。");
+      const lifecycle = $("save-draft").checked ? "draft" : "published";
+      const opensAt = $("open-now").checked && lifecycle === "published" ? new Date().toISOString() : hkTime($("opens-at").value);
+      const closesAt = hkTime($("closes-at").value);
+      if (Date.parse(closesAt) <= Date.parse(opensAt)) throw new Error("截止時間必須遲過開始時間。");
+      if (creationQuota.limit === 1 && Date.parse(closesAt) - Date.parse(opensAt) > 86400_000) throw new Error("免費活動嘅投票期間最長 24 小時，請調整截止時間。");
+      payload = {
+        name: $("event-name").value, question: $("event-question").value, options, opensAt, closesAt,
+        resultsVisibility: $("results-visibility").value, lifecycle,
+      };
+      if (creationQuota.limit === 1) rememberPendingCreation(payload);
+    }
+  } catch (error) {
+    note("create-message", error.message, "bad");
+    return;
+  }
+  creationBusy = true;
+  syncCreateAvailability();
+  note("create-message", pendingCreation ? "正在確認同一活動嘅建立結果…" : "正在建立活動…");
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (pendingCreation) headers["Idempotency-Key"] = pendingCreation.requestId;
+    const data = await api("/api/admin/events", { method: "POST", headers, body: pendingCreation?.payload || JSON.stringify(payload) });
+    if (stale(version)) return;
+    const responseVersion = await adoptResponsePrincipal(data, true);
+    if (responseVersion === null || stale(responseVersion)) return;
+    version = responseVersion;
+    if (!data.event || !/^[a-f0-9]{24}$/.test(data.event.id)) throw new Error("未能確認活動建立結果。");
+    clearPendingCreation();
+    setCreationQuota(data.creationQuota || (creationQuota?.limit === 1 ? { limit: 1, used: 1, eventId: data.event.id } : { limit: null, used: 0, eventId: null }));
+    publicBaseUrl = data.publicBaseUrl || location.origin;
+    justCreated.set(data.event.id, data.event);
+    renderEvents([data.event, ...knownEvents.filter((item) => item.id !== data.event.id)]);
+    $("event-form").reset();
+    resetEventTimes();
+    note("create-message", payload.lifecycle === "draft" ? "草稿已儲存。連結只供預覽，發佈前唔接受投票；核對內容同預定時間後再發佈。" : data.catalogPending ? "活動已建立，可以分享。活動列表索引暫時延遲，系統會自動重試。" : "活動已建立。請先打開分享連結核對內容，再派 QR code。", "good");
+  } catch (error) {
+    if (stale(version)) return;
+    const responseVersion = await adoptResponsePrincipal(error, true);
+    if (responseVersion === null || stale(responseVersion)) return;
+    version = responseVersion;
+    if (error.creationQuota) setCreationQuota(error.creationQuota);
+    if ([400, 422].includes(error.status) || error.code === "creation_quota_exhausted") {
+      clearPendingCreation();
+      note("create-message", error.message, "bad");
+      if (error.code === "creation_quota_exhausted") {
+        try { await loadEvents(); }
+        catch (refreshError) { if (!cancelled(refreshError) && !stale(version)) note("events-message", "請重新整理活動，查看已使用嘅免費活動。", "bad"); }
+      }
+    } else if (pendingCreation) {
+      note("create-message", error.code === "idempotency_conflict"
+        ? "同一建立請求嘅內容未能確認一致。請重新整理活動列表，核對已建立嘅活動；本頁保留原本內容，唔會另開活動。"
+        : "暫時未能確認活動有冇建立。請按「重試建立同一活動」；系統會用同一請求同內容，避免重複建立。", "bad");
+    } else if (!cancelled(error)) note("create-message", error.message, "bad");
+  } finally {
+    if (!stale(version)) { creationBusy = false; syncCreateAvailability(); }
+  }
+}
 $("logout-button").addEventListener("click", () => void logout());
 $("retry-logout").addEventListener("click", () => void logout());
 $("dismiss-account-key").addEventListener("click", clearAccountKey);
@@ -684,30 +850,9 @@ $("save-draft").addEventListener("change", syncCreateTiming);
 
 $("event-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const version = sessionVersion;
-  const options = $("event-options").value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
-  if (options.length < 2 || options.length > 20) return note("create-message", "請填 2–20 個選項，每行一項。", "bad");
-  $("create-button").disabled = true;
-  note("create-message", "正在建立活動…");
-  try {
-    const lifecycle = $("save-draft").checked ? "draft" : "published";
-    const opensAt = $("open-now").checked && lifecycle === "published" ? new Date().toISOString() : hkTime($("opens-at").value);
-    const closesAt = hkTime($("closes-at").value);
-    if (Date.parse(closesAt) <= Date.parse(opensAt)) throw new Error("截止時間必須遲過開始時間。");
-    const data = await send("/api/admin/events", "POST", {
-      name: $("event-name").value, question: $("event-question").value, options, opensAt, closesAt,
-      resultsVisibility: $("results-visibility").value, lifecycle,
-    });
-    if (stale(version)) return;
-    publicBaseUrl = data.publicBaseUrl || location.origin;
-    justCreated.set(data.event.id, data.event);
-    renderEvents([data.event, ...knownEvents.filter((item) => item.id !== data.event.id)]);
-    $("event-form").reset();
-    resetEventTimes();
-    note("create-message", lifecycle === "draft" ? "草稿已儲存。連結只供預覽，發佈前唔接受投票；核對內容同預定時間後再發佈。" : data.catalogPending ? "活動已建立，可以分享。活動列表索引暫時延遲，系統會自動重試。" : "活動已建立。請先打開分享連結核對內容，再派 QR code。", "good");
-  } catch (error) { if (!cancelled(error) && !stale(version)) note("create-message", error instanceof RangeError ? "請填有效嘅香港開始／截止時間。" : error.message, "bad"); }
-  finally { $("create-button").disabled = false; }
+  await submitEvent();
 });
+$("retry-create-button").addEventListener("click", () => void submitEvent());
 
 function csvCell(value) {
   let text = String(value ?? "");
@@ -765,6 +910,40 @@ $("refresh-events").addEventListener("click", async () => {
   finally { $("refresh-events").disabled = false; }
 });
 
+function readAuthCallback() {
+  const url = new URL(location.href);
+  const auth = url.searchParams.get("auth");
+  if (!auth) return null;
+  if (auth === "error") {
+    const messages = { login_failed: "登入未完成，請再試。若果持續失敗，請聯絡主辦平台。" };
+    note("auth-callback-message", messages[url.searchParams.get("reason")] || "登入未完成，請再試。", "bad");
+  } else if (auth === "success") note("auth-callback-message", "正在確認登入狀態…");
+  url.searchParams.delete("auth");
+  url.searchParams.delete("reason");
+  history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  return auth === "success" ? "success" : null;
+}
+
+async function loadAuthProviders() {
+  try {
+    const response = await fetch("/api/auth/providers", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error("Provider status unavailable");
+    const providers = await response.json();
+    const google = providers.google === true;
+    const apple = providers.apple === true;
+    $("google-login").hidden = !google;
+    $("apple-login").hidden = !apple;
+    $("auth-providers").hidden = !google && !apple;
+    $("auth-provider-message").textContent = google || apple
+      ? "主辦方首次登入會建立帳戶。登入狀態有效 8 小時；用完請登出。"
+      : "Google／Apple 登入尚未設定好，公開註冊暫未開放。已有管理員可以用密鑰登入。";
+    if (!google && !apple) $("staff-login").open = true;
+  } catch {
+    $("auth-provider-message").textContent = "暫時未能確認 Google／Apple 登入方式，請重新整理再試。管理員仍可用密鑰登入。";
+    $("staff-login").open = true;
+  }
+}
+
 async function bootstrap() {
   let legacyKey = "";
   try {
@@ -776,11 +955,14 @@ async function bootstrap() {
   setLoginBusy(true);
   try {
     const data = await api("/api/admin/me");
-    await openDashboard(data.principal || data);
+    await openDashboard(data.principal || data, data.creationQuota);
   } catch (error) {
+    if (!cancelled(error) && error.status === 401 && authCallback === "success") note("auth-callback-message", "未能確認登入狀態，請重新登入。", "bad");
     if (!cancelled(error) && error.status !== 401) note("login-message", "暫時未能確認登入狀態，請稍後再試。", "bad");
   } finally { if (!stale(version)) setLoginBusy(false); }
 }
 
 resetEventTimes();
+const authCallback = readAuthCallback();
+void loadAuthProviders();
 void bootstrap();

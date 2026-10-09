@@ -8,7 +8,7 @@
 
 **公開源碼：[Deep-AI-Alliance-DAA/WeVote](https://github.com/Deep-AI-Alliance-DAA/WeVote)。**
 
-呢份係香港廣東話使用指南。[English README](../README.md) · [部署到自己 Cloudflare 帳戶](DEPLOYMENT.md)。源碼採用 [MIT 授權](../LICENSE)。
+呢份係香港廣東話使用指南。[English README](../README.md) · [部署到自己 Cloudflare 帳戶](DEPLOYMENT.md) · [Google／Apple 主辦方登入設定](ORGANIZER_AUTH.md)。源碼採用 [MIT 授權](../LICENSE)。
 
 ## 靈感：「Keith $5 理論」
 
@@ -34,13 +34,23 @@
 
 ## 管理員帳戶同權限
 
+### 公開主辦方試用
+
+網站營運者設定好 Google 或 Apple credentials 後，訪客可以由主頁／管理頁登記做主辦方。每個公開登記帳戶一生最多建立 **1 個活動，草稿都計**；嗰個活動最多記錄 **10,000 張有效票**，投票期由開始到截止最多 **24 小時**。伺服器會原子地保留建立額度，同時檢查投票上限。儲存草稿已用咗個活動額度，發佈、截止、登出或再次登入都唔會重置。到達票數上限後，重試已記錄嘅相同選項仍然安全，唔會多計一票。
+
+Google 同 Apple 各自設定，未有完整設定嘅方式會停用。Google／Apple provider identity 係獨立應用帳戶，唔會按相同電郵自動合併；呢個做法亦唔能夠保證每個自然人只開一個帳戶。投票者仍然用公開 link／QR 同 Turnstile。設定方法睇 [主辦方登入指南](ORGANIZER_AUTH.md)。
+
+10,000 張係儲存票數上限；一萬人同時投票嘅突發容量仍未驗證。公開試用仍會產生營運者嘅 Cloudflare 用量。現階段冇付款、訂閱或 Stripe 接駁。
+
+### 原有密鑰帳戶
+
 系統擁有人用原有 `ADMIN_DASHBOARD_KEY` 登入，可新增最多 100 個命名帳戶：
 
 - **全站管理員（admin）**：管理全部活動。
 - **活動管理員（organizer）**：只管理自己建立或擁有人指派嘅活動。
 - **系統擁有人（owner）**：管理全部活動、開帳戶、改權限、停用帳戶、更新密鑰及分配活動。
 
-每個帳戶用獨立隨機 256-bit 登入密鑰，建立／更換時只顯示一次，需私下派發；伺服器只保存 hash。密鑰唔係人手設定密碼，冇公開註冊或電郵發送。登入後以 HttpOnly、Secure、SameSite=Strict cookie 維持八小時；管理密鑰唔再存喺 sessionStorage。停用／更換命名帳戶密鑰會立即撤銷該帳戶 session；登出會撤銷當前 session。**更換擁有人主密鑰唔會撤銷已簽發嘅 owner session，佢哋會維持有效直到八小時到期。** 帳戶及活動權限由伺服器檢查，唔靠前端隱藏。主密鑰屬系統擁有人，請勿分發畀其他管理員。
+原有密鑰帳戶用獨立隨機 256-bit 登入密鑰，建立／更換時只顯示一次，需私下派發；伺服器只保存 hash。密鑰唔係人手設定密碼，唔會以電郵發送。擁有人、admin 及原有密鑰 organizer 冇公開試用嘅「一個活動／10,000 票／24 小時」配額限制，仍須遵守各自權限、正常活動驗證及平台限制。登入後以 HttpOnly、Secure、SameSite=Strict cookie 維持八小時；管理密鑰唔再存喺 sessionStorage。停用／更換命名帳戶密鑰會立即撤銷該帳戶 session；登出會撤銷當前 session。**更換擁有人主密鑰唔會撤銷已簽發嘅 owner session，佢哋會維持有效直到八小時到期。** 帳戶及活動權限由伺服器檢查，唔靠前端隱藏。主密鑰屬系統擁有人，請勿分發畀其他管理員。
 
 草稿及未開始活動可以改名稱、題目同選項，分享連結維持不變；開始後鎖定。草稿可以改香港開始／截止時間；發佈前必須確保截止時間仍然有效。已發佈活動嘅時間固定。分區會固定開始後嘅權威投票版本，拒絕持有舊選項設定嘅請求。切換公開結果模式可短暫受快取影響；曾公開嘅資料唔能夠收回。
 
@@ -57,13 +67,13 @@
 ```text
 Cloudflare Pages：靜態主頁／管理頁／投票頁／結果頁
   /api/* → Service Binding → 私有 API Worker（無公開 workers.dev）
-    ├─ AdminDirectory：帳戶、session、角色及活動分配（只處理管理流量）
-    ├─ EventCoordinator：每個活動嘅權威內容／外觀、合併並發結果讀取
-    ├─ 128 個 VoteShard／活動：SQLite Durable Objects，儲存選票及計數
+    ├─ AdminDirectory：帳戶、OAuth identity／流程、session、權限及試用活動建立保留
+    ├─ EventCoordinator：權威內容／外觀、共用結果；試用票箱直接存在同一個物件
+    ├─ 原有／職員建立活動：128 個 VoteShard／活動，儲存選票及計數
     └─ EVENTS KV：管理員活動目錄（最終一致，可短暫延遲）
 ```
 
-Pages Function 快取公開結果，EventCoordinator 共用一次分區彙總，減少多人同時讀結果帶來嘅重複工作。新活動先持久儲存喺 Coordinator，再寫入 KV 目錄；目錄更新失敗會以 alarm 重試。靜態頁面由 `_routes.json` 排除 Function 執行。
+Pages Function 快取公開結果，原有／職員活動嘅 EventCoordinator 共用一次分區彙總。公開試用活動直接喺 Coordinator 嘅 SQLite transaction 檢查重票、全局 10,000 票上限及更新計數；結果直接讀本機計數，唔會每次喚醒 128 個分區。試用逐票匯出保留原有 128 分區／cursor 介面。新活動先持久儲存喺 Coordinator，再寫入 KV 目錄；目錄更新失敗會以 alarm 重試。靜態頁面由 `_routes.json` 排除 Function 執行。
 
 ## 本地開發
 
@@ -96,7 +106,7 @@ npm run test:setup  # 只檢查離線 setup／部署 helper
 npm run test:startup  # 只檢查測試啟動重試／清理
 ```
 
-`npm test` 自行開一個暫時本地 Worker，使用獨立密鑰同儲存，跑語法、快取、離線 helper、啟動／清理、API、帳戶／權限及草稿／發佈檢查，完成後停止 Worker 同刪除測試資料。唔會用已有 `.dev.vars` 或 Cloudflare 登入。投票檢查需要對 Turnstile 測試驗證服務發出 HTTPS 請求；呢啲係功能檢查，唔係五萬人壓力測試。
+`npm test` 自行開一個暫時本地 Worker，使用獨立密鑰同儲存，跑語法、快取、離線 helper、啟動／清理、API、帳戶／權限及草稿／發佈檢查，完成後停止 Worker 同刪除測試資料。唔會用已有 `.dev.vars` 或 Cloudflare 登入。投票檢查需要對 Turnstile 測試驗證服務發出 HTTPS 請求。試用票箱 unit test 用真 SQLite 檢查實際第 10,000／10,001 票、回滾、持久儲存重試及匯出；突發流量容量仍要另外測。
 
 針對自己本地 dev server 可以分別跑：
 
@@ -157,7 +167,7 @@ Workers／Pages Functions Free 每日共用 10 萬次動態請求，唔適合 5 
 
 Durable Objects 另有請求、執行時間、SQLite 讀寫及儲存用量；KV 亦有各自配額。**US$5 唔係固定總成本保證**，要計埋活動長度、更新頻率、重試、冷啟動、監控、測試同帳戶其他專案用量。[Durable Objects 定價](https://developers.cloudflare.com/durable-objects/platform/pricing/) · [KV 定價](https://developers.cloudflare.com/kv/platform/pricing/)
 
-Durable Objects Free 另外有**每日 10 萬次請求**上限，整個帳戶共用。一次完整票數彙總可以讀晒 128 個 vote shards，所以一次結果查詢唔等於一次 Durable Object 請求。即使睇 Dashboard 嘅人唔多，持續每三秒更新都可能用盡免費額度；持續即時投票建議用 Workers Paid。額度用盡時投票／管理 API 可以回傳 503，要等每日 UTC 00:00（香港時間 08:00）重置，或升級帳戶。
+Durable Objects Free 另外有**每日 10 萬次請求**上限，整個帳戶共用。原有／職員活動嘅完整票數彙總可以讀晒 128 個 vote shards；公開試用就直接讀 Coordinator 計數，減少分區 fan-out。不過登記、識別、收票、結果讀取、SQL 寫入及匯出都仍有平台用量。持續每三秒更新可能用盡免費額度；持續即時投票建議用 Workers Paid。額度用盡時投票／管理 API 可以回傳 503，要等相應額度重置或升級帳戶。[Durable Objects 定價](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 
 例：5 萬人留喺頁面 10 分鐘、每 3 秒讀一次，大約有 1,000 萬次結果請求，另加識別、收票及其他請求。相比每 11 秒刷新，結果查詢次數約為 3.7 倍。快取減少後端彙總，唔會消除所有入口請求費用。
 
@@ -165,7 +175,7 @@ Durable Objects Free 另外有**每日 10 萬次請求**上限，整個帳戶共
 
 ## 資料同授權
 
-應用層儲存瀏覽器／票據 ID 嘅 hash、選項同時間；公開結果按活動設定顯示總票數及選項彙總，唔會公開逐票識別。管理員逐票 CSV 包含 hash 同時間，仍須限制存取及保存期。正式密鑰放 Cloudflare Secrets；HTTPS 同每個 hostname 嘅 cookie 各自獨立，所以正式派一個統一網域嘅連結。
+應用層儲存瀏覽器／票據 ID 嘅 hash、選項同時間；主辦方登記亦會保存 provider、穩定 subject identifier、顯示名稱、角色同活動配額保留。唔會收集 provider 密碼，亦唔會保存 provider access／refresh token。公開結果按活動設定顯示總票數及選項彙總，唔會公開逐票識別。管理員逐票 CSV 包含 hash 同時間，仍須限制存取及保存期。正式密鑰放 Cloudflare Secrets；HTTPS 同每個 hostname 嘅 cookie 各自獨立，所以正式派一個統一網域嘅連結。
 
 ## Credits、參考同授權
 
@@ -173,6 +183,7 @@ WeVote 項目嘅 credits 按擁有人要求，列出 **[DAA.HK](https://daa.hk/)
 
 - **技術靈感：**[Keith Li 嘅 HK Traffic Intelligence](https://github.com/keithligh/hk-traffic-intelligence) README 講解喺 Cloudflare 共用快取資料、副本按時間更新嘅方法，係 WeVote 重視共享快取同節省資源嘅參考。
 - **QR 元件：**Kazuhiko Arase 嘅 `qrcode-generator` 2.0.4 採用 MIT，完整第三方版權及授權聲明保留喺 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+- **JWT／JWK 元件：**Filip Skokan 嘅 `jose` 6.2.12 用於主辦方登入 token 驗證同 Apple client assertion，採用 MIT；完整聲明保留喺 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
 - **視覺靈感：**[Streamline Freehand](https://www.streamlinehq.com/icons/freehand-sets) 提供手繪方向。本項目 AI 輔助插畫同原創 SVG 圖示採用 MIT，冇複製或打包 Streamline 圖示。
 
 本項目源碼採用 [MIT License](../LICENSE)，再分發時須保留版權及授權聲明。特定活動嘅海報、Logo 及其他供應圖片，使用權由各自權利人授權。

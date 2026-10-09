@@ -28,7 +28,7 @@
             <h1 id="home-title">每個選擇，<br><span class="sketch-underline">都值得被睇見。<svg viewBox="0 0 460 16" preserveAspectRatio="none" aria-hidden="true"><path d="M3 10C126 1 278 2 454 8M9 14c111-6 301-8 442-4"/></svg></span></h1>
             <p class="hero-description">由會議、社群到大型活動，用一個連結集合大家嘅意見。開一場投票，讓每個人輕鬆參與。</p>
             <div class="hero-actions"><a class="button button-primary" href="/admin.html">建立投票活動 <span aria-hidden="true">↗</span></a><a class="button button-quiet" href="#join">我想投票 <span aria-hidden="true">↓</span></a></div>
-            <div class="hero-traits"><span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg>分享連結或 QR code</span><span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg>即時掌握參與情況</span></div>
+            <div class="hero-traits"><span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg>分享連結或 QR code</span><span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg>投票者毋須登入</span><span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg>即時掌握參與情況</span></div>
           </div>
           <div class="hero-visual" aria-hidden="true">
             <div class="art-circle"></div><div class="art-outline"></div>
@@ -36,6 +36,10 @@
             <div class="art-note"><svg viewBox="0 0 34 34" fill="none"><path d="M3 24 12 8l7 17 12-9M5 29c10 2 18 2 26-1"/></svg><span>你嘅一票，<strong>讓答案更清晰。</strong></span></div>
             <span class="art-caption">A choice. A voice. A shared decision.</span>
           </div>
+        </section>
+        <section class="organizer-panel" id="organize" aria-labelledby="organizer-title">
+          <div><span class="section-marker">主辦方入口</span><h2 id="organizer-title">開一場活動，先免費試用。</h2><p id="home-trial">每個帳戶可建立一個活動，最多 10,000 張有效投票，投票期間最長 24 小時。儲存草稿亦會使用呢個配額。</p></div>
+          <div class="organizer-signin"><div id="home-auth-providers" class="organizer-actions" hidden><a id="home-google-login" class="button button-quiet" href="/api/auth/google/start" hidden>用 Google 登入 <span aria-hidden="true">↗</span></a><a id="home-apple-login" class="button button-quiet" href="/api/auth/apple/start" hidden>用 Apple 登入 <span aria-hidden="true">↗</span></a></div><p id="home-auth-message" class="organizer-status" role="status" aria-live="polite">正在確認主辦方登入方式…</p><a class="organizer-admin" href="/admin.html">已有帳戶／管理員密鑰登入 <span aria-hidden="true">→</span></a></div>
         </section>
         <section class="join-panel" id="join" aria-labelledby="join-title">
           <div class="join-heading"><span class="section-marker">參與投票</span><h2 id="join-title">有活動連結？由呢度開始。</h2><p>貼上主辦方提供嘅連結，或者輸入活動編號。</p></div>
@@ -48,7 +52,7 @@
         <section class="how-section" id="how" aria-labelledby="how-title">
           <div class="section-title"><div><span class="section-marker">由問題到答案</span><h2 id="how-title">簡單三步，集合每張投票。</h2></div><p>主辦方開活動，參加者一撳就入。</p></div>
           <div class="steps-grid">
-            <article class="step-card"><div class="step-top"><span class="step-number">01</span><svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M14 12c8-1 25-1 35 0l1 41c-13 2-25 2-36 0V12Z"/><path d="m23 24 3 3 6-7M23 37h17M23 45h12M38 23h5"/></svg></div><h3>開一場投票</h3><p>管理員設定題目、選項同開始／截止時間，準備好就可以分享。</p></article>
+            <article class="step-card"><div class="step-top"><span class="step-number">01</span><svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M14 12c8-1 25-1 35 0l1 41c-13 2-25 2-36 0V12Z"/><path d="m23 24 3 3 6-7M23 37h17M23 45h12M38 23h5"/></svg></div><h3>開一場投票</h3><p>主辦方登入後設定題目、選項同開始／截止時間，準備好就可以分享。</p></article>
             <article class="step-card"><div class="step-top"><span class="step-number">02</span><svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M10 10h16v16H10V10Zm28 0h16v16H38V10ZM10 38h16v16H10V38ZM38 38h7v7h9v9H38V38Z"/><path d="M16 16h4v4h-4zM44 16h4v4h-4zM16 44h4v4h-4zM53 35v4M32 12v7M32 30h8M10 32h8"/></svg></div><h3>分享連結或 QR code</h3><p>將同一條活動連結貼喺群組，或者展示 QR code，邀請大家加入。</p></article>
             <article class="step-card"><div class="step-top"><span class="step-number">03</span><svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M11 51c15 2 29 2 43 0M17 44V32h7v12M29 44V14h7v30M41 44V24h7v20"/><path d="m14 22 9-9M17 13h6v6"/></svg></div><h3>睇結果，帶走報告</h3><p>即時票數圖表，按設定公開結果；可以匯出 CSV 同列印報告。</p></article>
           </div>

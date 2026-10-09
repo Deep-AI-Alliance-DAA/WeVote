@@ -46,4 +46,22 @@ if ((eventId && eventPattern.test(eventId)) || fragment.has("ticket")) {
     input.value = eventId;
     showError();
   }
+
+  async function loadOrganizerProviders() {
+    const status = document.getElementById("home-auth-message");
+    try {
+      const response = await fetch("/api/auth/providers", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(15_000) });
+      if (!response.ok) throw new Error("Provider status unavailable");
+      const providers = await response.json();
+      const google = providers.google === true;
+      const apple = providers.apple === true;
+      document.getElementById("home-google-login").hidden = !google;
+      document.getElementById("home-apple-login").hidden = !apple;
+      document.getElementById("home-auth-providers").hidden = !google && !apple;
+      status.textContent = google || apple ? "只需主辦方登入；投票者毋須註冊。" : "Google／Apple 登入尚未設定好，公開註冊暫未開放。管理員仍可用密鑰登入。";
+    } catch {
+      status.textContent = "暫時未能確認主辦方登入方式，請到管理員入口再試。";
+    }
+  }
+  void loadOrganizerProviders();
 }

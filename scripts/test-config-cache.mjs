@@ -7,6 +7,7 @@ import { Script } from "node:vm";
 const source = await readFile(new URL("../src/worker.js", import.meta.url), "utf8");
 const executable = source
   .replace(/^import \{ DurableObject \} from "cloudflare:workers";$/m, "class DurableObject {}")
+  .replace(/^import .* from "\.\/(?:organizer-auth|trial-ballot)\.js";$/gm, "")
   .replace(/^export \{ AdminDirectory \} from "\.\/admin-directory\.js";$/m, "")
   .replace(/^export default /m, "const worker = ")
   .replace(/^export class /gm, "class ");
@@ -14,10 +15,10 @@ assert(!/^\s*(?:import|export)\b/m.test(executable), "Worker module transform ne
 
 let now = Date.parse("2026-10-09T04:00:00Z");
 class TestDate extends Date { static now() { return now; } }
-const { eventConfig, eventConfigs, EventCoordinator, resultsCacheControl } = new Script(
-  `${executable}\n;({ eventConfig, eventConfigs, EventCoordinator, resultsCacheControl });`,
+const { eventConfig, eventConfigs, EventCoordinator, resultsCacheControl, adminEvents } = new Script(
+  `${executable}\n;({ eventConfig, eventConfigs, EventCoordinator, resultsCacheControl, adminEvents });`,
   { filename: "src/worker.js" },
-).runInNewContext({ Date: TestDate, TextEncoder });
+).runInNewContext({ Date: TestDate, TextEncoder, URL });
 const readState = (config) => EventCoordinator.prototype.configState.call({ getConfig: () => config });
 const id = "0123456789abcdef01234567";
 const base = { id, lifecycle: "published", opensAt: now + 100, closesAt: now + 3600_000, ballotVersion: "old" };
@@ -139,4 +140,16 @@ for (const [lifecycle, opensAt, expectedPhase] of [
   assert.equal(reads, 0);
 }
 
-console.log("Config/result cache regression passed (7 scenarios).");
+// Revocation between authentication and quota lookup must fail closed. Null
+// means disabled/missing; valid unrestricted staff receive { limit: null }.
+const revokedDirectory = {
+  session: async () => ({ id, role: "organizer", selfRegistered: true }),
+  getCreationQuota: async () => null,
+  getReservedEvent: () => { throw new Error("Revoked account reached event recovery."); },
+};
+for (const method of ["GET", "POST"]) {
+  const request = new Request("http://127.0.0.1/api/admin/events", { method, headers: { Cookie: "wv_admin=fixture" } });
+  await assert.rejects(adminEvents(request, { ADMIN_DIRECTORY: { getByName: () => revokedDirectory } }), error => error.status === 401,
+    "Revoked quota cannot become unlimited creation or management.");
+}
+console.log("Config/result cache and account revocation regression passed (8 scenarios).");

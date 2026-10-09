@@ -19,6 +19,8 @@ npm run build:pages
 
 The tests use disposable local storage. They do not use an existing installation or Cloudflare login. Integration vote checks need outbound HTTPS to Cloudflare's public Turnstile test Siteverify endpoint; `test:setup`, `test:startup`, `test:assets` and `test:cache` run offline. These checks verify functional behavior, permissions and caching; they are not a 50,000-user load test.
 
+Local key login works without Google/Apple setup. Public provider sign-in requires a canonical HTTPS origin and optional provider credentials; the normal `http://localhost` setup leaves it disabled. Use an HTTPS staging installation with its own provider configuration to exercise a real sign-in flow. Trial SQL unit checks verify the 10,000-vote cap; they do not measure simultaneous voting capacity.
+
 ## 2. Select your account and create a KV namespace
 
 ```sh
@@ -127,6 +129,21 @@ In your Pages project's **Custom domains**, add the intended hostname first. For
 
 Add the custom hostname to your Turnstile widget and update `vars.PUBLIC_BASE_URL` in `wrangler.worker.local.jsonc` to the HTTPS origin, then redeploy the API. This controls generated event/QR links. Use the same canonical hostname throughout a vote: browser identity cookies belong to a hostname.
 
+## 6. Enable public organizer registration (optional)
+
+Follow [Google/Apple organizer sign-in setup](ORGANIZER_AUTH.md) after your canonical HTTPS hostname is active. Set exact return URLs under that hostname:
+
+| Provider | Return URL | Callback method |
+| --- | --- | --- |
+| Google web application | `https://<canonical-host>/api/auth/google/callback` | GET |
+| Apple Services ID | `https://<canonical-host>/api/auth/apple/callback` | POST, `application/x-www-form-urlencoded` |
+
+Add the complete chosen provider group to the existing ignored `.env.production.json` in a local editor. Retain the signing, admin, and Turnstile values. Google uses `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; Apple uses `APPLE_SERVICE_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, and `APPLE_PRIVATE_KEY` (the private PKCS#8 `.p8` contents encoded as a JSON string). Provider settings are independent; leave an unconfigured group absent. Deployment validation rejects incomplete configured groups. Redeploy the API through the helper so these values become Worker Secrets, then test sign-in on the canonical hostname. No Google/Apple developer resources are provisioned by `setup:cloudflare`.
+
+Publicly registered organizers receive one lifetime event, including a draft, a maximum 24-hour voting period, and up to 10,000 valid recorded votes. The server reserves the creation allowance and stores trial votes/counters in that event's coordinator with an atomic cap. Staff/key-created events continue using 128 vote shards and have no public-trial quota. These settings do not enable payments or Stripe.
+
+Changing the canonical hostname also requires updating provider return URLs. Existing login/session and voting cookies belong to their original hostname.
+
 ## Verify before sharing an event
 
 1. Open the public homepage and `/admin`, and sign in with your owner key.
@@ -136,6 +153,7 @@ Add the custom hostname to your Turnstile widget and update `vars.PUBLIC_BASE_UR
 5. Check the QR destination, CSV summary and print/PDF report.
 6. Wait until the disposable event's scheduled closing time, then verify voting stops and authorized raw CSV export works.
 7. Create organizer accounts and explicitly assign their events. Test their access before distributing keys.
+8. If public signup is enabled, test a provider login and one draft on staging: the draft uses the account's event allowance, a second creation is denied, and a period longer than 24 hours is denied. Use the isolated trial tests for the 10,000-vote boundary rather than filling a real event.
 
 Results use a shared snapshot of approximately two seconds plus client polling and network delay. A successful vote need not appear on every dashboard instantly. Public results follow the event's visibility setting.
 
@@ -154,12 +172,13 @@ The checked-in Pages template binds to `wevote-local-api`, the checked-in Worker
 
 ### Storage-backed APIs return 503
 
-Inspect the API Worker's `request_failed` logs before changing configuration. If the message is `Exceeded allowed volume of requests in Durable Objects free tier.`, the account's free daily Durable Object request allowance is exhausted. Wait for the daily reset at 00:00 UTC (08:00 Hong Kong time), or enable Workers Paid on the same account. Do not recreate namespaces, events, accounts or keys to address this error. Each result aggregation can read 128 shards, so sustained three-second dashboards need a budget for backend requests as well as Pages traffic. See [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+Inspect the API Worker's `request_failed` logs before changing configuration. If the message is `Exceeded allowed volume of requests in Durable Objects free tier.`, the account's free daily Durable Object request allowance is exhausted. Wait for the daily reset at 00:00 UTC (08:00 Hong Kong time), or enable Workers Paid on the same account. Do not recreate namespaces, events, accounts or keys to address this error. Staff-event result aggregation can read 128 shards. Trial results use coordinator counters; they still incur requests and SQL usage. Budget for backend operations and Pages traffic. See [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
 
 After the quota is available, verify an existing event's results and admin access, and monitor usage before inviting participants.
 
 ### Routine operation
 
+- Monitor trial signups and creation/vote limits. A trial account's draft consumes its lifetime event allowance; closing the event does not release that allowance. Provider subjects are separate identities, and multiple provider accounts can belong to one person.
 - Keep production secrets and exported votes private; issue individual admin/organizer keys rather than sharing the owner key.
 - Back up important data with an appropriate Cloudflare storage procedure and the app's authorized exports before an upgrade. A Git source ZIP contains no votes or accounts.
 - Monitor Workers, Durable Objects and KV usage. Measure your event's expected concurrency and request rate before relying on capacity or cost claims. Current pricing links are in the README.

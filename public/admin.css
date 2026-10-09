@@ -1,4 +1,5 @@
 .admin-shell { max-width: 1220px; }
+[hidden] { display: none !important; }
 .admin-intro { padding: 58px 0 46px; max-width: 750px; }
 .kicker, .section-number { color: #376a82; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
 .admin-intro h1 { margin: 17px 0 17px; font-size: clamp(38px, 5vw, 61px); line-height: 1.25; letter-spacing: -.06em; }
@@ -8,6 +9,23 @@
 .admin-card h2 { margin: 12px 0 8px; }
 #login-panel { max-width: 620px; }
 .login-form, .event-form { display: grid; gap: 11px; margin-top: 24px; }
+.auth-providers { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 24px; }
+.oauth-button { display: flex; align-items: center; justify-content: center; gap: 11px; flex: 1; min-width: 180px; min-height: 48px; padding: 11px 14px; border: 1px solid #bfcfd5; border-radius: 8px 7px 9px 8px; background: #fff; color: #243d4e; font-size: 13px; font-weight: 650; text-decoration: none; }
+.oauth-button:hover { background: #edf5f8; }
+.oauth-button:focus-visible, .staff-login > summary:focus-visible { outline: 2px solid #8eacb9; outline-offset: 4px; }
+.oauth-mark { display: inline-flex; justify-content: center; align-items: center; width: 18px; height: 20px; font-size: 19px; font-weight: 800; }
+.oauth-button > span:last-child { margin-left: auto; color: #82919b; }
+.auth-provider-message { color: #657482; font-size: 12px; line-height: 1.8; margin: 12px 0 0; }
+.staff-login { margin-top: 22px; border-top: 1px solid #d9e2e3; padding-top: 17px; }
+.staff-login > summary { color: #376a82; font-size: 13px; font-weight: 700; cursor: pointer; }
+.staff-login .admin-muted { margin: 14px 0 0; font-size: 12px; }
+.staff-login .login-form { margin-top: 17px; }
+.create-fields { display: grid; gap: 11px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.create-fields:disabled { opacity: .6; }
+.creation-quota { margin: 21px 0 0; padding: 16px 18px; background: #edf3f2; border: 1px solid #ccddda; border-radius: 7px 9px 8px 7px; color: #3a665f; }
+.creation-quota > strong { font-size: 13px; }
+.creation-quota > p { margin: 6px 0 0; font-size: 12px; line-height: 1.75; }
+.creation-quota > a { display: inline-block; margin-top: 8px; color: #376a82; font-size: 12px; text-underline-offset: 3px; }
 .login-form label, .event-form label:not(.check-row) { color: #243d4e; font-size: 13px; font-weight: 700; }
 .event-form small { color: #82919b; font-weight: 500; }
 .login-form input, .event-form input:not([type=checkbox]), .event-form textarea { width: 100%; border: 1px solid #cbd7db; border-radius: 8px; padding: 12px 13px; background: #fbfcfb; color: #17283c; outline: none; }

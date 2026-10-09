@@ -4,7 +4,7 @@
 // no Cloudflare account, deployment credential, or production data is used.
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,7 +12,12 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const suites = ["smoke-events.mjs", "smoke-admin.mjs", "smoke-drafts.mjs"];
+const allSuites = ["smoke-events.mjs", "smoke-admin.mjs", "smoke-drafts.mjs", "smoke-signup.mjs"];
+const argumentsList = process.argv.slice(2);
+if (argumentsList.length && (argumentsList.length !== 2 || argumentsList[0] !== "--suite" || !allSuites.includes(`smoke-${argumentsList[1]}.mjs`))) {
+  throw new Error("Usage: node scripts/test-local.mjs [--suite events|admin|drafts|signup]");
+}
+const suites = argumentsList.length ? [`smoke-${argumentsList[1]}.mjs`] : allSuites;
 const abort = new AbortController();
 const generatedSecrets = [0, 1, 2].map(() => randomBytes(32).toString("hex"));
 let workspace;
@@ -20,6 +25,55 @@ let worker;
 let activeSuite;
 let workerLog = "";
 let interruptCode;
+
+// This source is written only inside the disposable test workspace. Production
+// src/worker.js, build output and deployment entry points never import it.
+const fixtureWorker = String.raw`
+import application from "./worker.js";
+export { VoteShard, EventCoordinator, AdminDirectory } from "./worker.js";
+function json(body, status = 200) { return Response.json(body, { status, headers: { "Cache-Control": "no-store" } }); }
+function sorted(value) { return Array.isArray(value) ? value.map(sorted) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted(value[key])])) : value; }
+async function fingerprint(value) { return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(sorted(value))))), byte => byte.toString(16).padStart(2, "0")).join(""); }
+export default {
+  async fetch(request, env, context) {
+    const url = new URL(request.url);
+    if (!url.pathname.startsWith("/api/__local_test__/")) return application.fetch(request, env, context);
+    if (env.LOCAL_TEST_FIXTURES !== "disposable-only" || request.method !== "POST" ||
+        !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.protocol !== "http:" ||
+        request.headers.get("Origin") !== url.origin || request.headers.get("Authorization") !== "Bearer " + env.ADMIN_DASHBOARD_KEY) return json({ error: "Local fixture access denied" }, 403);
+    if (!request.headers.get("Content-Type")?.startsWith("application/json")) return json({ error: "JSON required" }, 415);
+    const body = await request.text();
+    if (new TextEncoder().encode(body).byteLength > 8192) return json({ error: "Fixture too large" }, 413);
+    let input;
+    try { input = JSON.parse(body); } catch { return json({ error: "Invalid fixture" }, 400); }
+    const directory = env.ADMIN_DIRECTORY.getByName("global");
+    if (url.pathname === "/api/__local_test__/seed-account") {
+      const principal = await directory.resolveOAuthAccount(input);
+      if (!principal) return json({ error: "Fixture account unavailable" }, 403);
+      const token = await directory.createSession(principal);
+      return json({ principal, cookie: "wv_admin=" + token }, 201);
+    }
+    if (url.pathname === "/api/__local_test__/reserve-intent") {
+      const result = await directory.reserveSelfRegisteredEvent(input.accountId, {
+        requestId: input.requestId, payloadHash: await fingerprint(input.input), eventId: input.event.id, event: input.event,
+      });
+      return json(result);
+    }
+    if (url.pathname === "/api/__local_test__/inspect-storage") {
+      if (!/^[a-f0-9]{24}$/.test(input.eventId) || !Array.isArray(input.shardIndexes) || input.shardIndexes.length > 2 ||
+          input.shardIndexes.some(index => !Number.isInteger(index) || index < 0 || index >= 128)) return json({ error: "Invalid storage query" }, 400);
+      const object = env.EVENT_COORDINATOR.getByName(input.eventId);
+      const config = await object.getConfig();
+      const totals = await Promise.all(input.shardIndexes.map(async index => {
+        const shard = env.VOTE_SHARD.get(env.VOTE_SHARD.idFromName(input.eventId + ":" + index));
+        return (await (await shard.fetch("https://shard.internal/count")).json()).turnout;
+      }));
+      return json({ coordinatorExists: Boolean(config), coordinatorTurnout: config?.trial ? (await object.snapshot()).turnout : null, shardTurnouts: totals });
+    }
+    return json({ error: "Unknown local fixture" }, 404);
+  },
+};
+`;
 
 // Isolate Wrangler's config/cache as well as its CLI environment, so existing
 // login sessions and process-level deployment credentials are not consulted.
@@ -163,12 +217,20 @@ process.on("SIGTERM", onSigterm);
 try {
   workspace = await mkdtemp(join(tmpdir(), "wevote-local-tests-"));
   await mkdir(join(workspace, "scripts"));
+  await mkdir(join(workspace, "node_modules"));
   await Promise.all([
     cp(join(root, "src"), join(workspace, "src"), { recursive: true }),
     cp(join(root, "public"), join(workspace, "public"), { recursive: true }),
     cp(join(root, "wrangler.worker.jsonc"), join(workspace, "wrangler.worker.jsonc")),
+    cp(join(root, "node_modules", "jose"), join(workspace, "node_modules", "jose"), { recursive: true }),
     ...suites.map((filename) => cp(join(root, "scripts", filename), join(workspace, "scripts", filename))),
   ]);
+  const configPath = join(workspace, "wrangler.worker.jsonc");
+  const originalConfig = await readFile(configPath, "utf8");
+  if (!/"main"\s*:\s*"src\/worker\.js"/.test(originalConfig)) throw new Error("Local test template must use the original Worker entry point.");
+  await writeFile(configPath, originalConfig.replace(/("main"\s*:\s*)"src\/worker\.js"/, '$1"src/local-fixture-worker.js"'));
+  await writeFile(join(workspace, "src", "local-fixture-worker.js"), fixtureWorker, { flag: "wx", mode: 0o600 });
+  await writeFile(join(workspace, ".local-fixture.json"), JSON.stringify({ kind: "disposable-wevote-integration", version: 1 }), { flag: "wx", mode: 0o600 });
   ensureNotInterrupted();
   const env = localEnvironment(workspace);
   const usedPorts = new Set();
@@ -183,6 +245,7 @@ try {
       const now = Date.now();
       const vars = [
         `PUBLIC_BASE_URL="${baseUrl}"`,
+        'LOCAL_TEST_FIXTURES="disposable-only"',
         'POLL_ID="demo-local"',
         'POLL_QUESTION="Choose a local test option"',
         `POLL_OPTIONS_JSON='${JSON.stringify([{ id: "a", label: "Option A" }, { id: "b", label: "Option B" }])}'`,

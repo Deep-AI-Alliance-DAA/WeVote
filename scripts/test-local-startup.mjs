@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 const source = dirname(fileURLToPath(import.meta.url));
 const fixture = await realpath(await mkdtemp(join(tmpdir(), "wevote-startup-test-")));
 const trace = join(fixture, "trace.jsonl");
-const suites = ["smoke-events.mjs", "smoke-admin.mjs", "smoke-drafts.mjs"];
+const suites = ["smoke-events.mjs", "smoke-admin.mjs", "smoke-drafts.mjs", "smoke-signup.mjs"];
 
 const wranglerStub = `
 import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -82,11 +82,12 @@ async function run(mode) {
 }
 
 try {
-  for (const directory of ["src", "public", "scripts", "node_modules/wrangler/bin"]) {
+  for (const directory of ["src", "public", "scripts", "node_modules/wrangler/bin", "node_modules/jose"]) {
     await mkdir(join(fixture, directory), { recursive: true });
   }
   await writeFile(join(fixture, "package.json"), '{"type":"module"}\n');
-  await writeFile(join(fixture, "wrangler.worker.jsonc"), "{}\n");
+  await writeFile(join(fixture, "wrangler.worker.jsonc"), '{"main":"src/worker.js"}\n');
+  await writeFile(join(fixture, "node_modules/jose/package.json"), '{"name":"jose","type":"module"}\n');
   await copyFile(join(source, "test-local.mjs"), join(fixture, "scripts", "test-local.mjs"));
   await writeFile(join(fixture, "node_modules/wrangler/bin/wrangler.js"), wranglerStub);
   for (const suite of suites) {

@@ -6,8 +6,8 @@ const TOKEN = /^[a-f0-9]{64}$/;
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_ACCOUNTS = 100;
-const SAFE_COLUMNS = "id, name, role, disabled, created_at";
-const ROOT = Object.freeze({ id: "root", name: "系統擁有人", role: "owner", disabled: false, createdAt: null });
+const SAFE_COLUMNS = "id, name, role, disabled, created_at, self_registered";
+const ROOT = Object.freeze({ id: "root", name: "系統擁有人", role: "owner", disabled: false, createdAt: null, selfRegistered: false });
 
 function randomHex(bytes = 32) {
   return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -19,7 +19,7 @@ async function digest(value) {
 }
 
 function safeAccount(row) {
-  return row ? { id: row.id, name: row.name, role: row.role, disabled: Boolean(row.disabled), createdAt: row.created_at } : null;
+  return row ? { id: row.id, name: row.name, role: row.role, disabled: Boolean(row.disabled), createdAt: row.created_at, selfRegistered: Boolean(row.self_registered) } : null;
 }
 
 function accountId(id) {
@@ -58,6 +58,37 @@ export class AdminDirectory extends DurableObject {
         credential_hash TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
       )`);
+      // Existing key accounts stay exempt from the public signup quota.
+      if (!this.sql.exec("PRAGMA table_info(accounts)").toArray().some((column) => column.name === "self_registered")) {
+        this.sql.exec("ALTER TABLE accounts ADD COLUMN self_registered INTEGER NOT NULL DEFAULT 0 CHECK (self_registered IN (0, 1))");
+      }
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS oauth_identities (
+        provider TEXT NOT NULL CHECK (provider IN ('google', 'apple')),
+        subject TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (provider, subject)
+      )`);
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS oauth_flows (
+        state_hash TEXT PRIMARY KEY,
+        provider TEXT NOT NULL CHECK (provider IN ('google', 'apple')),
+        nonce TEXT NOT NULL,
+        verifier TEXT,
+        redirect_uri TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      )`);
+      this.sql.exec("CREATE INDEX IF NOT EXISTS oauth_flows_expiry ON oauth_flows (expires_at)");
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS event_creation_reservations (
+        account_id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        event_id TEXT NOT NULL UNIQUE,
+        event_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`);
+      if (!this.sql.exec("PRAGMA table_info(event_creation_reservations)").toArray().some((column) => column.name === "event_json")) {
+        this.sql.exec("ALTER TABLE event_creation_reservations ADD COLUMN event_json TEXT");
+      }
       this.sql.exec(`CREATE TABLE IF NOT EXISTS sessions (
         token_hash TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -136,13 +167,128 @@ export class AdminDirectory extends DurableObject {
     const hash = await digest(key);
     const createdAt = new Date().toISOString();
     const account = this.ctx.storage.transactionSync(() => {
-      const count = this.sql.exec("SELECT COUNT(*) AS total FROM accounts").one().total;
+      const count = this.sql.exec("SELECT COUNT(*) AS total FROM accounts WHERE self_registered = 0").one().total;
       if (count >= MAX_ACCOUNTS) throw new Error("帳戶數量已達 100 個上限。");
       this.sql.exec("INSERT INTO accounts (id, name, role, disabled, credential_hash, created_at) VALUES (?, ?, ?, 0, ?, ?)", id, name, role, hash, createdAt);
-      return { id, name, role, disabled: false, createdAt };
+      return { id, name, role, disabled: false, createdAt, selfRegistered: false };
     });
     await this.ctx.storage.sync();
     return { account, key };
+  }
+
+  async createOAuthFlow(input) {
+    const now = Date.now();
+    if (!input || !TOKEN.test(input.stateHash) || !["google", "apple"].includes(input.provider) ||
+        !TOKEN.test(input.nonce) || (input.provider === "google" ? !TOKEN.test(input.verifier) : input.verifier !== null) ||
+        !Number.isSafeInteger(input.expiresAt) || input.expiresAt <= now || input.expiresAt > now + 601_000) throw new Error("登入流程資料無效。");
+    let redirect;
+    try { redirect = new URL(input.redirectUri); } catch { throw new Error("登入回調網址無效。"); }
+    if (redirect.protocol !== "https:" || redirect.username || redirect.password || redirect.search || redirect.hash ||
+        redirect.pathname !== `/api/auth/${input.provider}/callback`) throw new Error("登入回調網址無效。");
+    this.sql.exec("DELETE FROM oauth_flows WHERE state_hash IN (SELECT state_hash FROM oauth_flows WHERE expires_at <= ? LIMIT 100)", now);
+    this.sql.exec("INSERT INTO oauth_flows (state_hash, provider, nonce, verifier, redirect_uri, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+      input.stateHash, input.provider, input.nonce, input.verifier, input.redirectUri, input.expiresAt);
+    await this.ctx.storage.sync();
+  }
+
+  async consumeOAuthFlow(stateHash, provider) {
+    if (typeof stateHash !== "string" || !TOKEN.test(stateHash) || !["google", "apple"].includes(provider)) return null;
+    const flow = this.ctx.storage.transactionSync(() => {
+      const row = this.sql.exec("SELECT nonce, verifier, redirect_uri, expires_at FROM oauth_flows WHERE state_hash = ? AND provider = ?", stateHash, provider).toArray()[0];
+      if (!row) return null;
+      this.sql.exec("DELETE FROM oauth_flows WHERE state_hash = ?", stateHash);
+      return row.expires_at > Date.now() ? { nonce: row.nonce, verifier: row.verifier, redirectUri: row.redirect_uri, expiresAt: row.expires_at } : null;
+    });
+    await this.ctx.storage.sync();
+    return flow;
+  }
+
+  async resolveOAuthAccount(input) {
+    if (!input || !["google", "apple"].includes(input.provider) || typeof input.subject !== "string" ||
+        !input.subject || input.subject.length > 256 || /[\u0000-\u001f\u007f]/.test(input.subject)) throw new Error("登入身份無效。");
+    const name = accountName(input.name || "主辦方");
+    const id = randomHex(12);
+    // Retain the legacy schema without issuing a login key for social signup.
+    // The raw random credential is discarded and cannot be derived from its hash.
+    const unavailableCredentialHash = await digest(randomHex());
+    const createdAt = new Date().toISOString();
+    const configuredLimit = Number(this.env.PUBLIC_ORGANIZER_ACCOUNT_LIMIT || 10_000);
+    const limit = Number.isSafeInteger(configuredLimit) && configuredLimit > 0 && configuredLimit <= 1_000_000 ? configuredLimit : 10_000;
+    const account = this.ctx.storage.transactionSync(() => {
+      const identity = this.sql.exec("SELECT account_id FROM oauth_identities WHERE provider = ? AND subject = ?", input.provider, input.subject).toArray()[0];
+      if (identity) {
+        const row = this.sql.exec(`SELECT ${SAFE_COLUMNS} FROM accounts WHERE id = ? AND disabled = 0`, identity.account_id).toArray()[0];
+        return safeAccount(row);
+      }
+      if (this.sql.exec("SELECT COUNT(*) AS total FROM accounts WHERE self_registered = 1").one().total >= limit) return null;
+      this.sql.exec("INSERT INTO accounts (id, name, role, disabled, credential_hash, created_at, self_registered) VALUES (?, ?, 'organizer', 0, ?, ?, 1)", id, name, unavailableCredentialHash, createdAt);
+      this.sql.exec("INSERT INTO oauth_identities (provider, subject, account_id, created_at) VALUES (?, ?, ?, ?)", input.provider, input.subject, id, createdAt);
+      return { id, name, role: "organizer", disabled: false, createdAt, selfRegistered: true };
+    });
+    await this.ctx.storage.sync();
+    return account;
+  }
+
+  getCreationQuota(id) {
+    if (id === "root") return { limit: null, used: 0, eventId: null };
+    accountId(id);
+    const account = this.sql.exec("SELECT role, disabled, self_registered FROM accounts WHERE id = ?", id).toArray()[0];
+    if (!account || account.disabled) return null;
+    const reservation = this.sql.exec("SELECT event_id FROM event_creation_reservations WHERE account_id = ?", id).toArray()[0];
+    return { limit: account.self_registered && account.role !== "admin" ? 1 : null, used: reservation ? 1 : 0, eventId: reservation?.event_id || null };
+  }
+
+  lookupSelfRegisteredEvent(id, input) {
+    if (id === "root") return null;
+    accountId(id);
+    if (!input || typeof input.requestId !== "string" || !/^[A-Za-z0-9._:-]{16,128}$/.test(input.requestId) ||
+        typeof input.payloadHash !== "string" || !TOKEN.test(input.payloadHash)) throw new Error("活動重試識別無效。");
+    const account = this.sql.exec("SELECT role, disabled, self_registered FROM accounts WHERE id = ?", id).toArray()[0];
+    if (!account || account.disabled) return { error: "unauthorized" };
+    if (!account.self_registered || account.role === "admin") return null;
+    const existing = this.sql.exec("SELECT request_id, payload_hash, event_id FROM event_creation_reservations WHERE account_id = ?", id).toArray()[0];
+    if (!existing) return null;
+    if (existing.request_id !== input.requestId) return { error: "quota_exceeded" };
+    if (existing.payload_hash !== input.payloadHash) return { error: "idempotency_conflict" };
+    return { eventId: existing.event_id, reused: true };
+  }
+
+  getReservedEvent(id) {
+    if (id === "root") return null;
+    accountId(id);
+    const account = this.sql.exec("SELECT disabled FROM accounts WHERE id = ?", id).toArray()[0];
+    if (!account || account.disabled) return null;
+    const row = this.sql.exec("SELECT event_json FROM event_creation_reservations WHERE account_id = ?", id).toArray()[0];
+    return row?.event_json ? JSON.parse(row.event_json) : null;
+  }
+
+  async reserveSelfRegisteredEvent(id, input) {
+    if (id !== "root") accountId(id);
+    if (!input || typeof input.requestId !== "string" || !/^[A-Za-z0-9._:-]{16,128}$/.test(input.requestId) ||
+        typeof input.payloadHash !== "string" || !TOKEN.test(input.payloadHash)) throw new Error("活動重試識別無效。");
+    eventId(input.eventId);
+    const result = this.ctx.storage.transactionSync(() => {
+      if (id === "root") return { eventId: input.eventId, reused: false };
+      const account = this.sql.exec("SELECT role, disabled, self_registered FROM accounts WHERE id = ?", id).toArray()[0];
+      if (!account || account.disabled) return { error: "unauthorized" };
+      if (!account.self_registered || account.role === "admin") return { eventId: input.eventId, reused: false };
+      const existing = this.sql.exec("SELECT request_id, payload_hash, event_id FROM event_creation_reservations WHERE account_id = ?", id).toArray()[0];
+      if (existing) {
+        if (existing.request_id !== input.requestId) return { error: "quota_exceeded" };
+        if (existing.payload_hash !== input.payloadHash) return { error: "idempotency_conflict" };
+        return { eventId: existing.event_id, reused: true };
+      }
+      if (!input.event || typeof input.event !== "object" || Array.isArray(input.event) || input.event.id !== input.eventId || input.event.ownerId !== id) throw new Error("活動保留資料無效。");
+      const eventJson = JSON.stringify(input.event);
+      if (encoder.encode(eventJson).byteLength > 8192) throw new Error("活動保留資料太大。");
+      this.sql.exec("INSERT INTO event_creation_reservations (account_id, request_id, payload_hash, event_id, event_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        id, input.requestId, input.payloadHash, input.eventId, eventJson, new Date().toISOString());
+      return { eventId: input.eventId, reused: false };
+    });
+    // The lifetime reservation survives RPC/Worker failures. An ambiguous
+    // initialization timeout must be retried with this same request identifier.
+    await this.ctx.storage.sync();
+    return result;
   }
 
   async updateAccount(id, input) {

@@ -16,7 +16,7 @@ const rootKey = keyLine && /^["']/.test(keyLine) ? keyLine.slice(1, -1) : keyLin
 assert.ok(typeof rootKey === "string" && rootKey.length >= 32, "Local ADMIN_DASHBOARD_KEY is missing.");
 const runId = `${Date.now()}-${randomBytes(3).toString("hex")}`;
 const localIp = `198.51.100.${1 + randomBytes(1)[0] % 250}`;
-const accountFields = ["createdAt", "disabled", "id", "name", "role"];
+const accountFields = ["createdAt", "disabled", "id", "name", "role", "selfRegistered"];
 
 async function api(path, { method = "GET", cookie, body, status = 200, requestOrigin = origin } = {}) {
   const headers = { Origin: requestOrigin, "CF-Connecting-IP": localIp };
@@ -41,6 +41,7 @@ function safeAccount(account) {
   assert.ok(/^[a-f0-9]{24}$/.test(account.id), "Account ID format is invalid.");
   assert.ok(["admin", "organizer"].includes(account.role), "Account role is invalid.");
   assert.equal(typeof account.disabled, "boolean", "Account disabled state is invalid.");
+  assert.equal(account.selfRegistered, false, "Staff account must remain exempt from the public quota.");
 }
 
 async function login(key, status = 200) {
