@@ -1,22 +1,33 @@
 {
   "name": "wevote",
   "version": "0.1.0",
+  "description": "Self-hosted event voting, live results and administrator tools on Cloudflare.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/Deep-AI-Alliance-DAA/WeVote.git" },
+  "engines": { "node": ">=22" },
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --config wrangler.worker.jsonc",
-    "deploy": "wrangler deploy --config wrangler.worker.jsonc",
+    "deploy": "node scripts/deploy-cloudflare.mjs api",
+    "deploy:api": "node scripts/deploy-cloudflare.mjs api",
     "build:pages": "node scripts/build-pages.mjs",
-    "deploy:pages": "npm run build:pages && wrangler pages deploy pages/dist",
-    "check": "node --check src/worker.js && node --check src/pages-worker.js && node --check public/app.js && node --check public/admin.js && node --check public/home.js && node --check public/results.js && node --check public/share.js && node --check scripts/build-pages.mjs && node --check scripts/issue-tickets.mjs && node --check scripts/export-votes.mjs && node --check scripts/setup-dev.mjs && node --check scripts/smoke-events.mjs && node --check src/admin-directory.js && node --check public/presentation.js && node --check scripts/smoke-admin.mjs && node --check scripts/smoke-drafts.mjs && node --check scripts/test-config-cache.mjs",
+    "deploy:pages": "node scripts/deploy-cloudflare.mjs pages",
+    "check": "node --check src/worker.js && node --check src/pages-worker.js && node --check public/app.js && node --check public/admin.js && node --check public/home.js && node --check public/results.js && node --check public/share.js && node --check scripts/build-pages.mjs && node --check scripts/issue-tickets.mjs && node --check scripts/export-votes.mjs && node --check scripts/setup-dev.mjs && node --check scripts/smoke-events.mjs && node --check src/admin-directory.js && node --check public/presentation.js && node --check scripts/smoke-admin.mjs && node --check scripts/smoke-drafts.mjs && node --check scripts/test-config-cache.mjs && node --check scripts/setup-cloudflare.mjs && node --check scripts/deploy-cloudflare.mjs && node --check scripts/release-source.mjs && node --check scripts/test-local.mjs && node --check scripts/test-setup.mjs && node --check scripts/test-local-startup.mjs",
     "setup:dev": "node scripts/setup-dev.mjs",
+    "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
+    "release:source": "node scripts/release-source.mjs",
     "tickets": "node scripts/issue-tickets.mjs",
     "test:smoke": "node scripts/smoke-events.mjs",
     "test:admin": "node scripts/smoke-admin.mjs",
     "test:drafts": "node scripts/smoke-drafts.mjs",
-    "test:cache": "node scripts/test-config-cache.mjs"
+    "test:cache": "node scripts/test-config-cache.mjs",
+    "test:setup": "node scripts/test-setup.mjs",
+    "test:local": "node scripts/test-local.mjs",
+    "test": "npm run check && npm run test:cache && npm run test:setup && npm run test:startup && npm run test:local",
+    "test:startup": "node scripts/test-local-startup.mjs"
   },
   "devDependencies": {
-    "wrangler": "^4.69.0"
+    "wrangler": "4.149.0"
   }
 }

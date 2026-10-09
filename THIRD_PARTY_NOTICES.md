@@ -36,3 +36,11 @@ SOFTWARE.
 ```
 
 The upstream source also notes that “QR Code” is a registered trademark of DENSO WAVE INCORPORATED.
+
+## Original project artwork
+
+`public/assets/ballot-hero.webp` was generated for WeVote with AI assistance. The favicon and interface drawings were created for this project. These original project assets are distributed under the repository's MIT license.
+
+Streamline Freehand provided visual style inspiration. No Streamline icons or other Streamline assets were copied or vendored into this project.
+
+Event posters, organizer logos, and other images supplied for a particular deployment are separate from the original project artwork. The source release excludes the competition poster; redistribution of deployment-specific images requires permission from their rights holders.

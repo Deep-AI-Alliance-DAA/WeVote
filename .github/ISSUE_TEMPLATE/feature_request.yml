@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a focused improvement to WeVote.
+title: "[Feature] "
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: What user task needs improvement?
+      description: Explain the current workflow and why it is difficult.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the outcome and who would use it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or constraints
+      description: Include relevant cost, accessibility, privacy, or deployment constraints using synthetic examples.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Keep credentials, real participant data, and private events out of this issue.

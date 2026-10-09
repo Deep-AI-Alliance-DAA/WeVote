@@ -1,11 +1,13 @@
 {
-  "name": "wevote-api",
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Local development template. Use setup:cloudflare for your own deployment.
+  "name": "wevote-local-api",
   "workers_dev": false,
   "main": "src/worker.js",
   "compatibility_date": "2026-10-09",
-  "vars": { "PUBLIC_BASE_URL": "https://vote.daa.hk" },
+  "vars": { "PUBLIC_BASE_URL": "http://localhost:8787" },
   "kv_namespaces": [
-    { "binding": "EVENTS", "id": "12ebc9b1f2524f73a894d068994c4361" }
+    { "binding": "EVENTS", "id": "00000000000000000000000000000000" }
   ],
   "observability": {
     "enabled": true,

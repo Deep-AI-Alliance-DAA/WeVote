@@ -1,8 +1,10 @@
 {
-  "name": "wevote",
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Local Pages template; deployment uses .cloudflare/pages/wrangler.jsonc.
+  "name": "wevote-local",
   "pages_build_output_dir": "./pages/dist",
   "compatibility_date": "2026-10-09",
   "services": [
-    { "binding": "WEVOTE_API", "service": "wevote-api" }
+    { "binding": "WEVOTE_API", "service": "wevote-local-api" }
   ]
 }
