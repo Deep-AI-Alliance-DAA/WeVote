@@ -20,6 +20,7 @@ let turnstileToken = null;
 let turnstileWidget = null;
 let busy = false;
 let recorded = false;
+let renderedOptions = "";
 
 if (!eventId) {
   const fragment = new URLSearchParams(location.hash.slice(1));
@@ -136,8 +137,12 @@ function renderPoll(data) {
   poll = data;
   const canVote = publicEvent ? identityReady : Boolean(ticket);
   if (canVote) recorded = sessionStorage.getItem(recordedKey) === "yes";
-  if (first) {
+  const optionsVersion = JSON.stringify([data.ballotVersion, data.options]);
+  if (renderedOptions !== optionsVersion) {
     renderOptions(data.options);
+    renderedOptions = optionsVersion;
+  }
+  if (first) {
     if (canVote && !recorded && data.phase === "open") void loadTurnstile(data.turnstileSiteKey);
   }
   elements["poll-id"].textContent = data.name || data.pollId;
@@ -201,7 +206,7 @@ async function loadPoll() {
   pollLoading = true;
   try {
     // Keep the shared edge snapshot, but avoid adding a separate browser cache delay.
-    const response = await fetch(publicEvent ? `${eventApi}/results` : "/api/results", { cache: "no-store" });
+    const response = await fetch(publicEvent ? `${eventApi}/results` : "/api/results", { cache: "no-store", signal: AbortSignal.timeout(25_000) });
     if (!response.ok) throw new Error(response.status === 404 ? "搵唔到呢個活動，請檢查主辦方提供嘅連結。" : "目前未能讀取投票資料。");
     const data = await response.json();
     if (!Number.isSafeInteger(data.turnout) || data.turnout < 0) throw new Error("參與票數未能讀取，稍後會再試。");
@@ -209,7 +214,7 @@ async function loadPoll() {
     if (transientError && !busy && !recorded) { message(""); transientError = false; }
     if (publicEvent && poll.phase !== "closed" && !identityReady) void loadIdentity();
   } catch (error) {
-    message(error.message || "目前未能讀取投票資料。", "bad");
+    message(error.name === "TimeoutError" ? "連線較慢，稍後會自動重試更新票數。" : error.message || "目前未能讀取投票資料。", "bad");
     transientError = true;
   } finally {
     pollLoading = false;
@@ -220,7 +225,7 @@ async function loadIdentity() {
   if (!publicEvent || identityReady || identityLoading || poll?.phase === "closed") return;
   identityLoading = true;
   try {
-    const response = await fetch(`${eventApi}/identity`, { credentials: "same-origin", cache: "no-store" });
+    const response = await fetch(`${eventApi}/identity`, { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(25_000) });
     if (!response.ok) throw new Error("目前未能準備投票識別，稍後會再試。");
     identityReady = true;
     if (poll) renderPoll(poll);
@@ -245,7 +250,7 @@ elements["vote-form"].addEventListener("submit", async (event) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ ...(publicEvent ? {} : { ticket }), optionId: choice.value, turnstileToken }),
+      body: JSON.stringify({ ...(publicEvent ? { ballotVersion: poll.ballotVersion } : { ticket }), optionId: choice.value, turnstileToken }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "投票未能送出。");

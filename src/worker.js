@@ -260,6 +260,7 @@ async function eventResults(request, env, id) {
     pollId: config.id,
     name: config.name,
     question: config.question,
+    ballotVersion: config.ballotVersion || "legacy",
     options: config.options,
     opensAt: config.opensAt,
     closesAt: config.closesAt,
@@ -298,6 +299,9 @@ async function eventVote(request, env, id) {
   if (!config.options.some((option) => option.id === body?.optionId)) return json({ error: "選項無效。" }, 400);
   const voter = await voterFromCookie(request, config, env.VOTE_SIGNING_KEY);
   if (!voter) return json({ error: "瀏覽器投票識別已失效，請重新整理頁面。" }, 403);
+  if (body.ballotVersion !== (config.ballotVersion || "legacy") && !(body.ballotVersion === undefined && !config.ballotVersion)) {
+    return json({ error: "投票內容已更新，請重新整理後再投票。" }, 409);
+  }
   let human;
   try { human = await checkTurnstile(body.turnstileToken, env, request); }
   catch { return json({ error: "驗證暫時失敗，請稍後再試。" }, 503); }

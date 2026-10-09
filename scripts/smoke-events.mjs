@@ -58,8 +58,9 @@ await api(`${route}/vote`, { method: "POST", body: { optionId: "o1", turnstileTo
 await api(`${route}/vote`, { method: "POST", cookie: cookie + "bad", body: { optionId: "o1", turnstileToken: "test" } }, 403);
 await api(`${route}/vote`, { method: "POST", cookie, headers: { Origin: "https://other.example" }, body: { optionId: "o1" } }, 403);
 await api(`${route}/vote`, { method: "POST", cookie, body: { optionId: "invalid" } }, 400);
-await api(`${route}/vote`, { method: "POST", cookie, body: { optionId: "o1" } }, 403);
-const cast = { method: "POST", cookie, body: { optionId: "o20", turnstileToken: "test" } };
+await api(`${route}/vote`, { method: "POST", cookie, body: { optionId: "o1", ballotVersion: open.ballotVersion } }, 403);
+const cast = { method: "POST", cookie, body: { optionId: "o20", turnstileToken: "test", ballotVersion: open.ballotVersion } };
+await api(`${route}/vote`, { ...cast, body: { ...cast.body, ballotVersion: "stale-version" } }, 409);
 await api(`${route}/vote`, cast);
 assert.equal((await api(`${route}/vote`, cast)).data.duplicate, true);
 await api(`${route}/vote`, { ...cast, body: { ...cast.body, optionId: "o2" } }, 409);
