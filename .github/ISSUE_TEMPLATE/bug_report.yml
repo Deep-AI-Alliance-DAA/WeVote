@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a reproducible problem using synthetic data.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security vulnerability, follow SECURITY.md instead of posting exploit details here. Do not include keys, tokens, cookies, signed voting tickets, real participant information, or private exports.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the user task and observed problem.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use a local or authorized test instance and synthetic names/options.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: Commit SHA or release, if known
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser/device, Node/Wrangler versions, and local or deployed instance. Avoid account identifiers and private event URLs.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant evidence
+      description: Sanitized errors or screenshots. Remove credentials, participant names, and other private data.

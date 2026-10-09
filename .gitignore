@@ -2,9 +2,14 @@ node_modules/
 .wrangler/
 pages/dist/
 dist/
+.cloudflare/
+wrangler.*.local.jsonc
+releases/
+private-assets/
 .dev*.vars
 .env*
 !.env.example
 tickets*.csv
 votes*.csv
 *.log
+.DS_Store
