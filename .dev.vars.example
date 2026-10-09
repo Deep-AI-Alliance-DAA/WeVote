@@ -1,0 +1,9 @@
+POLL_ID="demo-2026"
+POLL_QUESTION="你支持邊個方案？"
+POLL_OPTIONS_JSON='[{"id":"a","label":"方案 A"},{"id":"b","label":"方案 B"}]'
+POLL_OPENS_AT="2026-10-09T00:00:00Z"
+POLL_CLOSES_AT="2026-10-10T00:00:00Z"
+VOTE_SIGNING_KEY="replace-with-a-random-secret-at-least-32-characters"
+TURNSTILE_SITE_KEY="1x00000000000000000000AA"
+TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA"
+ADMIN_EXPORT_KEY="replace-with-a-different-random-secret-at-least-32-characters"

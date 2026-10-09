@@ -1,0 +1,16 @@
+{
+  "name": "wevote",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "node --check src/worker.js && node --check public/app.js && node --check scripts/issue-tickets.mjs && node --check scripts/export-votes.mjs && node --check scripts/setup-dev.mjs",
+    "setup:dev": "node scripts/setup-dev.mjs",
+    "tickets": "node scripts/issue-tickets.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.69.0"
+  }
+}
