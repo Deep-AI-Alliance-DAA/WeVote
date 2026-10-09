@@ -116,7 +116,7 @@ function renderCountdown() {
   if (delta <= 0) {
     updateButton();
     elements.countdown.textContent = "已截止";
-    if (poll.phase === "open" && Date.now() - lastCloseRefresh > 10_000) {
+    if (poll.phase === "open" && Date.now() - lastCloseRefresh > 3_000) {
       lastCloseRefresh = Date.now();
       void loadPoll();
     }
@@ -178,7 +178,7 @@ function renderPoll(data) {
     if (data.phase === "draft") turnoutNote.textContent = "草稿預覽只供核對內容，唔接受投票。發佈後先按預定時間開放。";
     else if (data.phase === "closed") turnoutNote.textContent = data.turnout === 0 ? "活動已截止，未有已記錄投票。開啟連結或掃碼唔會計票。" : "只計已成功提交嘅投票。正式結果已喺下方公布。";
     else if (data.phase === "pending") turnoutNote.textContent = "活動未開始。開啟連結或掃碼唔會計票，成功提交投票後先會記錄。";
-    else turnoutNote.textContent = `${data.turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票，唔包括開啟連結或掃碼次數。"}票數約每 10 秒更新，剛提交可能要稍等。`;
+    else turnoutNote.textContent = `${data.turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票，唔包括開啟連結或掃碼次數。"}每 3 秒自動更新票數，剛提交可能要稍等。`;
   }
   elements["updated-at"].textContent = new Intl.DateTimeFormat("zh-HK", { timeZone: "Asia/Hong_Kong", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(data.updatedAt));
   const labels = { draft: "草稿預覽", pending: "等待開始", open: "投票進行中", closed: "投票已結束" };
@@ -278,7 +278,7 @@ elements["vote-form"].addEventListener("submit", async (event) => {
     message(result.duplicate ? "呢張票之前已經記錄，毋須重複提交。" : "投票成功！多謝參與。參與票數會喺下一輪更新。", "good");
     void loadPoll();
     // The immediate GET can still return the shared snapshot from before this vote.
-    setTimeout(() => { if (!document.hidden) void loadPoll(); }, 12_000);
+    setTimeout(() => { if (!document.hidden) void loadPoll(); }, 3_500);
   } catch (error) {
     message(error.message || "投票未能送出，請再試。", "bad");
     turnstileToken = null;
@@ -298,6 +298,6 @@ if (eventId && !publicEvent) {
 }
 setInterval(() => {
   if (!document.hidden && poll?.phase !== "closed") void loadPoll();
-}, 11_000);
+}, 3_000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void loadPoll(); });
 setInterval(renderCountdown, 1000);

@@ -3,6 +3,7 @@ export { AdminDirectory } from "./admin-directory.js";
 
 const SHARDS = 128;
 const MAX_OPTIONS = 20;
+const RESULT_SNAPSHOT_MS = 2000;
 const encoder = new TextEncoder();
 
 function json(body, status = 200, cacheControl = "no-store") {
@@ -50,8 +51,8 @@ function phase(config, now = Date.now()) {
 }
 
 function resultsCacheControl(config, state, updatedAt) {
-  let seconds = state === "closed" ? 60 : 10;
-  if (state !== "closed" && updatedAt) seconds = Math.max(1, Math.floor((timestamp(updatedAt) + 10_000 - Date.now()) / 1000));
+  let seconds = state === "closed" ? 60 : RESULT_SNAPSHOT_MS / 1000;
+  if (state !== "closed" && updatedAt) seconds = Math.max(1, Math.min(seconds, Math.floor((timestamp(updatedAt) + RESULT_SNAPSHOT_MS - Date.now()) / 1000)));
   const boundary = state === "pending" ? timestamp(config.opensAt) : timestamp(config.closesAt);
   if (state !== "closed") seconds = Math.max(1, Math.min(seconds, Math.floor((boundary - Date.now()) / 1000)));
   return `public, max-age=${seconds}`;
@@ -727,7 +728,7 @@ export class EventCoordinator extends DurableObject {
     if (!config) throw new Error("Event configuration unavailable.");
     while (true) {
       const state = phase(config);
-      if (this.snapshotValue?.phase === state && Date.now() - this.snapshotValue.refreshedAt < 10_000) {
+      if (this.snapshotValue?.phase === state && Date.now() - this.snapshotValue.refreshedAt < RESULT_SNAPSHOT_MS) {
         return { ...this.snapshotValue, ...this.displaySettings() };
       }
       // Every edge location reaches this same event object. Concurrent cache
