@@ -1,0 +1,24 @@
+{
+  "name": "wevote-api",
+  "workers_dev": false,
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-09",
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 0.01 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "VOTE_SHARD", "class_name": "VoteShard" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["VoteShard"] }
+  ]
+}

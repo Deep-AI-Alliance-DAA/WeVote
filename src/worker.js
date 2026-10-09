@@ -188,7 +188,7 @@ export default {
       if (url.pathname === "/api/admin/export" && request.method === "GET") return await exportShard(request, env);
       return json({ error: "找不到頁面。" }, 404);
     } catch (error) {
-      console.error("Request failed:", error);
+      console.error(JSON.stringify({ event: "request_failed", message: error instanceof Error ? error.message : "unknown" }));
       return json({ error: "系統暫時未能處理請求。" }, 503);
     }
   },

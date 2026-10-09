@@ -1,19 +1,8 @@
 {
   "name": "wevote",
-  "main": "src/worker.js",
+  "pages_build_output_dir": "./pages/dist",
   "compatibility_date": "2026-10-09",
-  "cache": { "enabled": true },
-  "assets": {
-    "directory": "./public",
-    "binding": "ASSETS",
-    "run_worker_first": ["/api/*"]
-  },
-  "durable_objects": {
-    "bindings": [
-      { "name": "VOTE_SHARD", "class_name": "VoteShard" }
-    ]
-  },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["VoteShard"] }
+  "services": [
+    { "binding": "WEVOTE_API", "service": "wevote-api" }
   ]
 }

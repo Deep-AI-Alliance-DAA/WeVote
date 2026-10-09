@@ -1,6 +1,8 @@
 node_modules/
 .wrangler/
-.dev.vars
+pages/dist/
+dist/
+.dev*.vars
 .env*
 !.env.example
 tickets*.csv

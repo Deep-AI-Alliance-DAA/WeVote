@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "check": "node --check src/worker.js && node --check public/app.js && node --check scripts/issue-tickets.mjs && node --check scripts/export-votes.mjs && node --check scripts/setup-dev.mjs",
+    "dev": "wrangler dev --config wrangler.worker.jsonc",
+    "deploy": "wrangler deploy --config wrangler.worker.jsonc",
+    "build:pages": "node scripts/build-pages.mjs",
+    "deploy:pages": "npm run build:pages && wrangler pages deploy pages/dist",
+    "check": "node --check src/worker.js && node --check src/pages-worker.js && node --check public/app.js && node --check scripts/build-pages.mjs && node --check scripts/issue-tickets.mjs && node --check scripts/export-votes.mjs && node --check scripts/setup-dev.mjs",
     "setup:dev": "node scripts/setup-dev.mjs",
     "tickets": "node scripts/issue-tickets.mjs"
   },
