@@ -147,6 +147,8 @@ Workers／Pages Functions Free 每日共用 10 萬次動態請求，唔適合 5 
 
 Durable Objects 另有請求、執行時間、SQLite 讀寫及儲存用量；KV 亦有各自配額。**US$5 唔係固定總成本保證**，要計埋活動長度、更新頻率、重試、冷啟動、監控、測試同帳戶其他專案用量。[Durable Objects 定價](https://developers.cloudflare.com/durable-objects/platform/pricing/) · [KV 定價](https://developers.cloudflare.com/kv/platform/pricing/)
 
+Durable Objects Free 另外有**每日 10 萬次請求**上限，整個帳戶共用。一次完整票數彙總可以讀晒 128 個 vote shards，所以一次結果查詢唔等於一次 Durable Object 請求。即使睇 Dashboard 嘅人唔多，持續每三秒更新都可能用盡免費額度；持續即時投票建議用 Workers Paid。額度用盡時投票／管理 API 可以回傳 503，要等每日 UTC 00:00（香港時間 08:00）重置，或升級帳戶。
+
 例：5 萬人留喺頁面 10 分鐘、每 3 秒讀一次，大約有 1,000 萬次結果請求，另加識別、收票及其他請求。相比每 11 秒刷新，結果查詢次數約為 3.7 倍。快取減少後端彙總，唔會消除所有入口請求費用。
 
 **未完成 5 萬人同時投票嘅正式壓力測試。** 活動前要測突發進入／提交成功率、重票處理、p95 延遲、冷啟動同結果更新延遲；同時核對 Free／Paid 配額。分區數目唔係容量證明。

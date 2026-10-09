@@ -152,6 +152,14 @@ The checked-in Pages template binds to `wevote-local-api`, the checked-in Worker
 
 ## Operating your installation
 
+### Storage-backed APIs return 503
+
+Inspect the API Worker's `request_failed` logs before changing configuration. If the message is `Exceeded allowed volume of requests in Durable Objects free tier.`, the account's free daily Durable Object request allowance is exhausted. Wait for the daily reset at 00:00 UTC (08:00 Hong Kong time), or enable Workers Paid on the same account. Do not recreate namespaces, events, accounts or keys to address this error. Each result aggregation can read 128 shards, so sustained three-second dashboards need a budget for backend requests as well as Pages traffic. See [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
+After the quota is available, verify an existing event's results and admin access, and monitor usage before inviting participants.
+
+### Routine operation
+
 - Keep production secrets and exported votes private; issue individual admin/organizer keys rather than sharing the owner key.
 - Back up important data with an appropriate Cloudflare storage procedure and the app's authorized exports before an upgrade. A Git source ZIP contains no votes or accounts.
 - Monitor Workers, Durable Objects and KV usage. Measure your event's expected concurrency and request rate before relying on capacity or cost claims. Current pricing links are in the README.
