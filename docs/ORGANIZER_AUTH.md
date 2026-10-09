@@ -32,9 +32,11 @@ Set `PUBLIC_BASE_URL` in the private API Worker configuration to your one public
 
 1. In your Google project, configure the OAuth consent screen/audience and create an OAuth client of type **Web application**.
 2. Add the exact authorized redirect URI: `https://<canonical-host>/api/auth/google/callback`. Scheme, hostname, path, and trailing slash must match the registered URI. Use the callback shown here without a trailing slash.
-3. Copy the client ID into `GOOGLE_CLIENT_ID` and the client secret into `GOOGLE_CLIENT_SECRET`. Use Google test users while your consent configuration is in testing mode; follow Google's publishing/verification requirements before a public rollout. [Google web-server OAuth setup](https://developers.google.com/identity/protocols/oauth2/web-server)
+3. Copy the client ID into `GOOGLE_CLIENT_ID` and the client secret into `GOOGLE_CLIENT_SECRET`. Follow Google's publishing and verification requirements for your audience, branding, and requested scopes. [Google web-server OAuth setup](https://developers.google.com/identity/protocols/oauth2/web-server)
 
 WeVote requests `openid email profile`, uses an authorization-code flow with PKCE, and verifies Google's signed identity token, audience, issuer, expiry, and nonce. The callback is handled on the server. No browser SDK client-secret configuration is needed.
+
+For only these basic sign-in scopes, Google's **Testing** status does not require users to appear in the test-user list, does not show the testing warning, and does not impose the seven-day authorization expiry. This exception stops applying if you add other OAuth scopes. It does not establish production readiness or replace Google's applicable branding verification, publishing, and domain requirements. [Google app audience and Testing exception](https://support.google.com/cloud/answer/15549945?hl=en)
 
 ## Apple website / Services ID
 
