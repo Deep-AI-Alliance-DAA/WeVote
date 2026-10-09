@@ -79,9 +79,10 @@ npx wrangler pages dev pages/dist
 ```bash
 npm test
 npm run test:setup  # 只檢查離線 setup／部署 helper
+npm run test:startup  # 只檢查測試啟動重試／清理
 ```
 
-`npm test` 自行開一個暫時本地 Worker，使用獨立密鑰同儲存，跑語法、快取、離線 helper、API、帳戶／權限及草稿／發佈檢查，完成後停止 Worker 同刪除測試資料。唔會用已有 `.dev.vars` 或 Cloudflare 登入。投票檢查需要對 Turnstile 測試驗證服務發出 HTTPS 請求；呢啲係功能檢查，唔係五萬人壓力測試。
+`npm test` 自行開一個暫時本地 Worker，使用獨立密鑰同儲存，跑語法、快取、離線 helper、啟動／清理、API、帳戶／權限及草稿／發佈檢查，完成後停止 Worker 同刪除測試資料。唔會用已有 `.dev.vars` 或 Cloudflare 登入。投票檢查需要對 Turnstile 測試驗證服務發出 HTTPS 請求；呢啲係功能檢查，唔係五萬人壓力測試。
 
 針對自己本地 dev server 可以分別跑：
 

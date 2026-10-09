@@ -66,16 +66,26 @@ async function terminate(processHandle) {
   await Promise.race([done, delay(1000, undefined, { ref: false })]);
 }
 
-async function reservePort() {
-  const server = createServer();
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  return {
-    port: server.address().port,
-    release: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
-  };
+async function reservePort(excluded = new Set()) {
+  for (let pick = 0; pick < 10; pick++) {
+    const server = createServer();
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const port = server.address().port;
+    const release = () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    if (excluded.has(port)) {
+      await release();
+      continue;
+    }
+    excluded.add(port);
+    return {
+      port,
+      release,
+    };
+  }
+  throw new Error("Could not reserve a fresh local test port.");
 }
 
 function ensureNotInterrupted() {
@@ -160,48 +170,65 @@ try {
     ...suites.map((filename) => cp(join(root, "scripts", filename), join(workspace, "scripts", filename))),
   ]);
   ensureNotInterrupted();
-  const http = await reservePort();
-  let inspector;
-  try {
-    inspector = await reservePort();
-    const baseUrl = `http://127.0.0.1:${http.port}`;
-    const now = Date.now();
-    const vars = [
-      `PUBLIC_BASE_URL="${baseUrl}"`,
-      'POLL_ID="demo-local"',
-      'POLL_QUESTION="Choose a local test option"',
-      `POLL_OPTIONS_JSON='${JSON.stringify([{ id: "a", label: "Option A" }, { id: "b", label: "Option B" }])}'`,
-      `POLL_OPENS_AT="${new Date(now - 60_000).toISOString()}"`,
-      `POLL_CLOSES_AT="${new Date(now + 2 * 60 * 60_000).toISOString()}"`,
-      `VOTE_SIGNING_KEY="${generatedSecrets[0]}"`,
-      'TURNSTILE_SITE_KEY="1x00000000000000000000AA"',
-      'TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA"',
-      `ADMIN_DASHBOARD_KEY="${generatedSecrets[1]}"`,
-      `ADMIN_EXPORT_KEY="${generatedSecrets[2]}"`,
-    ];
-    await writeFile(join(workspace, ".dev.vars"), `${vars.join("\n")}\n`, { flag: "wx", mode: 0o600 });
-    const env = localEnvironment(workspace);
-    await http.release();
-    await inspector.release();
-    ensureNotInterrupted();
-    console.log("Starting a disposable local Worker (no Cloudflare login required)…");
-    worker = managedProcess(process.execPath, [
-      join(root, "node_modules", "wrangler", "bin", "wrangler.js"),
-      "dev", "--config", join(workspace, "wrangler.worker.jsonc"),
-      "--local", "--ip", "127.0.0.1", "--port", String(http.port),
-      "--inspector-port", String(inspector.port), "--persist-to", join(workspace, "state"),
-      "--show-interactive-dev-session", "false", "--log-level", "error",
-    ], { cwd: workspace, env, stdio: ["ignore", "pipe", "pipe"] });
-    worker.child.stdout.on("data", captureLog);
-    worker.child.stderr.on("data", captureLog);
-    await waitUntilReady(baseUrl);
-    for (const filename of suites) await runSuite(filename, baseUrl, env);
-    console.log("All local integration suites passed.");
-  } finally {
-    // close() is harmless after release; reservations must also close if setup fails.
-    await http.release().catch(() => {});
-    if (inspector) await inspector.release().catch(() => {});
+  const env = localEnvironment(workspace);
+  const usedPorts = new Set();
+  let baseUrl;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    workerLog = "";
+    const http = await reservePort(usedPorts);
+    let inspector;
+    try {
+      inspector = await reservePort(usedPorts);
+      baseUrl = `http://127.0.0.1:${http.port}`;
+      const now = Date.now();
+      const vars = [
+        `PUBLIC_BASE_URL="${baseUrl}"`,
+        'POLL_ID="demo-local"',
+        'POLL_QUESTION="Choose a local test option"',
+        `POLL_OPTIONS_JSON='${JSON.stringify([{ id: "a", label: "Option A" }, { id: "b", label: "Option B" }])}'`,
+        `POLL_OPENS_AT="${new Date(now - 60_000).toISOString()}"`,
+        `POLL_CLOSES_AT="${new Date(now + 2 * 60 * 60_000).toISOString()}"`,
+        `VOTE_SIGNING_KEY="${generatedSecrets[0]}"`,
+        'TURNSTILE_SITE_KEY="1x00000000000000000000AA"',
+        'TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA"',
+        `ADMIN_DASHBOARD_KEY="${generatedSecrets[1]}"`,
+        `ADMIN_EXPORT_KEY="${generatedSecrets[2]}"`,
+      ];
+      await writeFile(join(workspace, ".dev.vars"), `${vars.join("\n")}\n`, { flag: attempt === 1 ? "wx" : "w", mode: 0o600 });
+      await http.release();
+      await inspector.release();
+      ensureNotInterrupted();
+      console.log("Starting a disposable local Worker (no Cloudflare login required)…");
+      worker = managedProcess(process.execPath, [
+        join(root, "node_modules", "wrangler", "bin", "wrangler.js"),
+        "dev", "--config", join(workspace, "wrangler.worker.jsonc"),
+        "--local", "--ip", "127.0.0.1", "--port", String(http.port),
+        "--inspector-port", String(inspector.port), "--persist-to", join(workspace, "state"),
+        "--show-interactive-dev-session", "false", "--log-level", "error",
+      ], { cwd: workspace, env, stdio: ["ignore", "pipe", "pipe"] });
+      worker.child.stdout.on("data", captureLog);
+      worker.child.stderr.on("data", captureLog);
+      await waitUntilReady(baseUrl);
+      break;
+    } catch (error) {
+      // Miniflare opens internal ephemeral listeners before workerd binds our
+      // released HTTP/inspector ports. Retry only an explicit startup collision.
+      const collision = /\bEADDRINUSE\b|bind\(\): Address already in use \(os error (?:48|98)\)/.test(`${error.message}\n${workerLog}`);
+      if (abort.signal.aborted || !collision || attempt === 3) throw error;
+      await terminate(worker);
+      worker = undefined;
+      await rm(join(workspace, "state"), { recursive: true, force: true });
+      console.warn(`Local port collision before readiness; retrying startup (${attempt + 1}/3).`);
+      await delay(200, undefined, { signal: abort.signal });
+    } finally {
+      // Reservations must also close if setup fails before spawning Wrangler.
+      await http.release().catch(() => {});
+      if (inspector) await inspector.release().catch(() => {});
+    }
   }
+  // Test failures are final: only the pre-readiness startup can be retried.
+  for (const filename of suites) await runSuite(filename, baseUrl, env);
+  console.log("All local integration suites passed.");
 } catch (error) {
   process.exitCode = interruptCode || 1;
   console.error(error.message);

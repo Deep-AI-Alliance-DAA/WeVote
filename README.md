@@ -49,9 +49,10 @@ Local development uses emulated storage. Turnstile test keys are for local testi
 ```bash
 npm test
 npm run test:setup  # Offline setup/deployment-helper checks only
+npm run test:startup  # Offline test-runner startup/cleanup checks only
 ```
 
-`npm test` runs syntax, cache, setup, and integration checks. It starts and stops a disposable local Worker with temporary keys/storage, without using a Cloudflare login or your existing `.dev.vars`. Integration voting checks require outbound HTTPS to Turnstile's test verification service. These are functional checks, not a capacity test.
+`npm test` runs syntax, cache, setup, startup, and integration checks. It starts and stops a disposable local Worker with temporary keys/storage, without using a Cloudflare login or your existing `.dev.vars`. Integration voting checks require outbound HTTPS to Turnstile's test verification service. These are functional checks, not a capacity test.
 
 For targeted checks against your own local dev server:
 

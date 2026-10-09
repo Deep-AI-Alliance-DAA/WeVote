@@ -36,6 +36,8 @@ jobs:
         run: npm run test:cache
       - name: Check local and deployment setup
         run: npm run test:setup
+      - name: Check local Worker startup recovery
+        run: npm run test:startup
       - name: Build Pages bundle
         run: npm run build:pages
       - name: Test local Worker, accounts, and drafts

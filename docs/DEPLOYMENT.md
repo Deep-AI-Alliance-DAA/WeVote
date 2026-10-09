@@ -17,7 +17,7 @@ npm test
 npm run build:pages
 ```
 
-The tests use disposable local storage. They do not use an existing installation or Cloudflare login. Integration vote checks need outbound HTTPS to Cloudflare's public Turnstile test Siteverify endpoint; `test:setup` and `test:cache` run offline. These checks verify functional behavior, permissions and caching; they are not a 50,000-user load test.
+The tests use disposable local storage. They do not use an existing installation or Cloudflare login. Integration vote checks need outbound HTTPS to Cloudflare's public Turnstile test Siteverify endpoint; `test:setup`, `test:startup` and `test:cache` run offline. These checks verify functional behavior, permissions and caching; they are not a 50,000-user load test.
 
 ## 2. Select your account and create a KV namespace
 

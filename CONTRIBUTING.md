@@ -40,7 +40,7 @@ Run the self-contained checks:
 npm test
 ```
 
-This runs syntax, cache, offline setup-helper checks, and the local integration suites. It creates a disposable Worker with temporary storage and keys, then stops it and removes the fixture. No Cloudflare login or existing `.dev.vars` is used. Integration voting checks need outbound HTTPS to Turnstile's test verification service.
+This runs syntax, cache, offline setup/startup checks, and the local integration suites. It creates a disposable Worker with temporary storage and keys, then stops it and removes the fixture. No Cloudflare login or existing `.dev.vars` is used. Integration voting checks need outbound HTTPS to Turnstile's test verification service.
 
 Use `npm run test:setup` for offline setup/deployment-helper verification, `npm run check` for syntax, and `npm run test:cache` for cache checks. With your own local dev server running, use the smoke checks relevant to a focused change:
 
