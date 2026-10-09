@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const SHARDS = 128;
+const MAX_OPTIONS = 20;
 const encoder = new TextEncoder();
 
 function json(body, status = 200, cacheControl = "no-store") {
@@ -17,7 +18,7 @@ function settings(env) {
   if (
     !/^[a-zA-Z0-9_-]{1,64}$/.test(env.POLL_ID || "") ||
     !env.POLL_QUESTION ||
-    !Array.isArray(options) || options.length < 2 || options.length > 6 ||
+    !Array.isArray(options) || options.length < 2 || options.length > MAX_OPTIONS ||
     options.some((option) => !/^[a-zA-Z0-9_-]{1,32}$/.test(option?.id || "") || typeof option?.label !== "string" || !option.label.trim()) ||
     new Set(options.map((option) => option.id)).size !== options.length ||
     !Number.isFinite(opensAt) || !Number.isFinite(closesAt) || opensAt >= closesAt ||
@@ -327,7 +328,7 @@ async function adminEvents(request, env) {
   const opensAt = Date.parse(input?.opensAt || "");
   const closesAt = Date.parse(input?.closesAt || "");
   if (!name || name.length > 100 || !question || question.length > 300 ||
-      !Array.isArray(labels) || labels.length < 2 || labels.length > 6 ||
+      !Array.isArray(labels) || labels.length < 2 || labels.length > MAX_OPTIONS ||
       labels.some((label) => typeof label !== "string" || !label.trim() || label.trim().length > 100) ||
       !Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= Math.max(opensAt, Date.now()) ||
       closesAt - opensAt > 90 * 86400_000) return json({ error: "請檢查活動名稱、題目、選項同時間。" }, 400);

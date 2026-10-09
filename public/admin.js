@@ -157,7 +157,7 @@ $("open-now").addEventListener("change", () => {
 $("event-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const options = $("event-options").value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
-  if (options.length < 2 || options.length > 6) return note("create-message", "請填 2–6 個選項，每行一項。", "bad");
+  if (options.length < 2 || options.length > 20) return note("create-message", "請填 2–20 個選項，每行一項。", "bad");
   $("create-button").disabled = true;
   note("create-message", "正在建立活動…");
   try {

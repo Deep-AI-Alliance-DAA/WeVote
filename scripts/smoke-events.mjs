@@ -39,10 +39,17 @@ const scheduled = await create({ opensAt: new Date(Date.now() + 60_000).toISOStr
 assert.equal((await api(`/api/events/${scheduled.id}/results`)).data.phase, "pending");
 await api(`/api/events/${scheduled.id}/vote`, { method: "POST", body: { optionId: "o1", turnstileToken: "test" } }, 403);
 
-const event = await create({ closesAt: new Date(Date.now() + 24_000).toISOString() });
+await api("/api/admin/events", { method: "POST", auth: true, body: {
+  name: "Too many options", question: "Choose one", options: Array.from({ length: 21 }, (_, i) => `Option ${i + 1}`),
+  opensAt: new Date(Date.now() - 1000).toISOString(), closesAt: new Date(Date.now() + 60_000).toISOString(),
+} }, 400);
+const maximumOptions = Array.from({ length: 20 }, (_, i) => `方案${i + 1}`.padEnd(100, "選"));
+const event = await create({ name: "名".repeat(100), question: "題".repeat(300), options: maximumOptions,
+  closesAt: new Date(Date.now() + 24_000).toISOString() });
 const route = `/api/events/${event.id}`;
 const open = (await api(`${route}/results`)).data;
 assert.equal(open.phase, "open");
+assert.equal(open.options.length, 20);
 assert.equal(open.counts, null);
 const identity = await api(`${route}/identity`);
 const cookie = identity.response.headers.get("Set-Cookie").split(";")[0];
@@ -52,7 +59,7 @@ await api(`${route}/vote`, { method: "POST", cookie: cookie + "bad", body: { opt
 await api(`${route}/vote`, { method: "POST", cookie, headers: { Origin: "https://other.example" }, body: { optionId: "o1" } }, 403);
 await api(`${route}/vote`, { method: "POST", cookie, body: { optionId: "invalid" } }, 400);
 await api(`${route}/vote`, { method: "POST", cookie, body: { optionId: "o1" } }, 403);
-const cast = { method: "POST", cookie, body: { optionId: "o1", turnstileToken: "test" } };
+const cast = { method: "POST", cookie, body: { optionId: "o20", turnstileToken: "test" } };
 await api(`${route}/vote`, cast);
 assert.equal((await api(`${route}/vote`, cast)).data.duplicate, true);
 await api(`${route}/vote`, { ...cast, body: { ...cast.body, optionId: "o2" } }, 409);
@@ -68,12 +75,12 @@ await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(event.
 const closed = (await api(`${route}/results`)).data;
 assert.equal(closed.phase, "closed");
 assert.equal(closed.turnout, 1);
-assert.deepEqual(closed.counts, { o1: 1, o2: 0 });
+assert.deepEqual(closed.counts, Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`o${i + 1}`, i === 19 ? 1 : 0])));
 await api(`${route}/vote`, cast, 403);
 await api(`/api/admin/events/${event.id}/export?shard=0`, {}, 401);
 await api(`/api/admin/events/${event.id}/export?shard=128`, { auth: true }, 400);
 const exports = await Promise.all(Array.from({ length: 128 }, (_, shard) => api(`/api/admin/events/${event.id}/export?shard=${shard}`, { auth: true })));
 const rows = exports.flatMap(({ data }) => data.rows);
 assert.equal(rows.length, 1);
-assert.equal(rows[0].option_id, "o1");
+assert.equal(rows[0].option_id, "o20");
 console.log(`Passed ${checks} local API checks: event timing, privacy, identity, duplicate votes, event isolation and complete export.`);
