@@ -53,6 +53,7 @@ function onboardingSteps() {
     steps.push({ target: $("event-name"), title: "寫低題目同選項。", body: limited
       ? "免費試用可建立一個活動，最多 10,000 張有效投票，投票期間最長 24 小時。先準備活動名稱、問題同 2–20 個選項；草稿亦會使用活動額度。"
       : "填活動名稱、投票問題同 2–20 個選項。團隊管理帳戶可以建立多個活動，每場都會有自己嘅連結。" });
+    steps.push({ target: $("event-selection-mode"), title: "揀單選，或者多選。", body: "單選每張投票揀一項；多選可以設定每張最多揀幾項。每張成功提交嘅投票只計一次，免費試用嘅 10,000 張額度亦以投票張數計算。活動開始後投票方式會鎖定。" });
     steps.push({ target: $("closes-at"), title: "設定時間同結果公開方式。", body: "開始／截止時間用香港時間。可以先儲存草稿核對內容，再發佈；結果可即時公開，或截止後先公開。導覽只作介紹，唔會幫你提交活動。" });
   }
   steps.push({ target: firstEvent?.querySelector(".event-share") || $("events-title"), title: "分享同一條連結或 QR code。", body: "建立後，呢度會列出你可管理嘅活動。可以複製連結、下載 QR 圖，或開啟社交分享；Instagram 可用下載嘅 QR 圖發佈 Story。草稿連結只供預覽，發佈後先接受投票。" });
@@ -181,6 +182,7 @@ function restorePendingCreation() {
       || typeof payload.name !== "string" || payload.name.length > 100 || typeof payload.question !== "string" || payload.question.length > 300
       || !Array.isArray(payload.options) || payload.options.length < 2 || payload.options.length > 20
       || payload.options.some((option) => typeof option !== "string" || option.length > 200)
+      || (payload.maxChoices !== undefined && (!Number.isSafeInteger(payload.maxChoices) || payload.maxChoices < 1 || payload.maxChoices > payload.options.length))
       || !Number.isFinite(Date.parse(payload.opensAt)) || !Number.isFinite(Date.parse(payload.closesAt))
       || !["draft", "published"].includes(payload.lifecycle) || !["live", "after-close"].includes(payload.resultsVisibility)) {
       clearPendingCreation();
@@ -190,6 +192,8 @@ function restorePendingCreation() {
     $("event-name").value = payload.name;
     $("event-question").value = payload.question;
     $("event-options").value = payload.options.join("\n");
+    $("event-selection-mode").value = (payload.maxChoices ?? 1) > 1 ? "multiple" : "single";
+    $("event-max-choices").value = String((payload.maxChoices ?? 1) > 1 ? payload.maxChoices : 2);
     $("save-draft").checked = payload.lifecycle === "draft";
     $("open-now").checked = false;
     $("opens-at").value = hkInput(new Date(payload.opensAt));
@@ -256,7 +260,49 @@ function syncCreateTiming() {
   $("opens-at").required = !immediate;
   $("draft-help").hidden = !draft;
   $("create-button").textContent = draft ? "儲存草稿 ↗" : "建立 event ↗";
+  syncCreateChoices();
   syncCreateAvailability();
+}
+
+function optionLabels(value) {
+  return value.split(/\r?\n/).map((label) => label.trim()).filter(Boolean);
+}
+
+function ballotMaxChoices(event) {
+  return Number.isSafeInteger(event.maxChoices) && event.maxChoices >= 1 && event.maxChoices <= 20 ? event.maxChoices : 1;
+}
+
+function selectionSummary(event) {
+  const maxChoices = ballotMaxChoices(event);
+  return maxChoices > 1 ? `多選 · 每張可選 1–${maxChoices} 項，每張投票只計一次` : "單選 · 每張投票只可選 1 項";
+}
+
+function syncChoiceControls(mode, max, field, options, help, locked = false) {
+  const multiple = mode.value === "multiple";
+  const count = optionLabels(options.value).length;
+  const cap = Math.max(2, Math.min(20, count));
+  field.hidden = !multiple;
+  max.disabled = locked || !multiple;
+  max.required = multiple;
+  max.max = String(cap);
+  if (Number(max.value) > cap) max.value = String(cap);
+  const text = multiple
+    ? `每張投票可選 1 至設定上限嘅項目，上限唔可多過 ${cap} 項。${count < 2 ? "請先填至少 2 個選項。" : ""}每張投票只計一次；結果百分比合計可以超過 100%。`
+    : "每張投票只可選 1 項；成功提交先會記錄。";
+  if (help.textContent !== text) help.textContent = text;
+}
+
+function syncCreateChoices() {
+  syncChoiceControls($("event-selection-mode"), $("event-max-choices"), $("event-max-choices-field"), $("event-options"), $("event-choice-help"));
+}
+
+function readMaxChoices(mode, max, optionCount) {
+  if (mode.value === "single") return 1;
+  const value = Number(max.value);
+  if (mode.value !== "multiple" || !Number.isSafeInteger(value) || value < 2 || value > 20 || value > optionCount) {
+    throw new Error(`多選上限必須係 2–${Math.min(20, optionCount)} 之間嘅整數，唔可多過選項數目。`);
+  }
+  return value;
 }
 
 function hkTime(value) {
@@ -287,6 +333,8 @@ function refreshEventCard(item, event) {
   badge.textContent = label;
   badge.className = `event-status ${phase}`;
   item.querySelector(".event-times").textContent = `${phase === "draft" ? "預定 " : ""}${hkDisplay(event.opensAt)} 開始 · ${hkDisplay(event.closesAt)} 截止`;
+  const selection = item.querySelector(".event-selection-summary");
+  if (selection) selection.textContent = selectionSummary(event);
   const draftNote = item.querySelector(".event-draft-note");
   if (draftNote) draftNote.hidden = phase !== "draft";
   const share = eventShareMounts.get(item);
@@ -345,7 +393,9 @@ function appendResultSettings(item, event) {
       const presentation = data.presentation || detail.presentation || {};
       event.resultsVisibility = data.resultsVisibility || detail.resultsVisibility;
       event.presentation = presentation;
+      event.maxChoices = ballotMaxChoices(detail);
       item.querySelector(".event-results-mode").textContent = event.resultsVisibility === "live" ? "結果：即時公開" : "結果：截止後公開";
+      item.querySelector(".event-selection-summary").textContent = selectionSummary(event);
       body.replaceChildren();
       buildContentEditor(detail);
       buildAppearanceEditor(data.resultsVisibility || detail.resultsVisibility, presentation);
@@ -358,28 +408,57 @@ function appendResultSettings(item, event) {
     const section = node("section", "event-editor-section");
     section.append(node("h4", "", "活動內容"));
     let isDraft = detail.lifecycle === "draft";
+    let working = false;
     const editable = isDraft || eventPhase(detail)[1] === "pending";
-    const help = node("p", "event-setting-help", isDraft ? "草稿可修改內容及預定時間。先儲存修改，核對後再發佈。" : editable ? "開始前可以修改名稱、題目同選項。開始後內容會鎖定。" : "活動已開始，名稱、題目同選項已鎖定。");
+    const help = node("p", "event-setting-help", isDraft ? "草稿可修改內容、投票方式及預定時間。先儲存修改，核對後再發佈。" : editable ? "開始前可以修改名稱、題目、選項同投票方式。開始後內容會鎖定。" : "活動已開始，名稱、題目、選項同投票方式已鎖定。");
     section.append(help);
     const form = node("form", "event-editor-form");
     const name = editorField(form, "活動名稱", "input", { type: "text", value: detail.name, required: true, maxLength: 100, disabled: !editable });
     const question = editorField(form, "投票問題", "textarea", { value: detail.question, required: true, maxLength: 300, rows: 3, disabled: !editable });
     const labels = detail.options.map((option) => typeof option === "string" ? option : option.label).join("\n");
     const options = editorField(form, "選項 · 每行一項，2–20 項", "textarea", { value: labels, required: true, rows: Math.min(8, Math.max(3, detail.options.length)), disabled: !editable });
+    const mode = editorField(form, "投票方式", "select", { id: `event-selection-mode-${event.id}`, disabled: !editable });
+    for (const [value, text] of [["single", "單選 · 每張投票揀一項"], ["multiple", "多選 · 每張投票可揀幾項"]]) {
+      const option = node("option", "", text);
+      option.value = value;
+      mode.append(option);
+    }
+    const initialMax = ballotMaxChoices(detail);
+    mode.value = initialMax > 1 ? "multiple" : "single";
+    const max = editorField(form, "每張投票最多可選 · 唔可多過選項數目", "input", { id: `event-max-choices-${event.id}`, type: "number", min: "2", max: "20", step: "1", value: String(initialMax > 1 ? initialMax : 2) });
+    const maxField = max.parentElement;
+    const choiceHelp = node("p", "event-setting-help");
+    choiceHelp.id = `event-choice-help-${event.id}`;
+    choiceHelp.setAttribute("aria-live", "polite");
+    mode.setAttribute("aria-describedby", choiceHelp.id);
+    max.setAttribute("aria-describedby", choiceHelp.id);
+    form.append(choiceHelp);
     const opens = isDraft ? editorField(form, "預定開始時間 · 香港時間", "input", { type: "datetime-local", value: hkInput(new Date(detail.opensAt)), required: true }) : null;
     const closes = isDraft ? editorField(form, "截止時間 · 香港時間", "input", { type: "datetime-local", value: hkInput(new Date(detail.closesAt)), required: true }) : null;
+    function syncEditorChoices() {
+      const unlocked = !working && (isDraft || eventPhase(detail)[1] === "pending");
+      for (const input of [name, question, options, mode]) input.disabled = !unlocked;
+      if (opens) opens.disabled = working || !isDraft;
+      if (closes) closes.disabled = working || !isDraft;
+      syncChoiceControls(mode, max, maxField, options, choiceHelp, !unlocked);
+    }
+    syncEditorChoices();
+    mode.addEventListener("change", syncEditorChoices);
+    options.addEventListener("input", syncEditorChoices);
+    max.addEventListener("input", syncEditorChoices);
+    form.addEventListener("focusin", syncEditorChoices);
     const status = node("p", "event-access-status");
     status.setAttribute("role", "status");
     if (editable) {
       const save = node("button", "small-button", "儲存活動內容");
       save.type = "submit";
       form.append(save);
-      let working = false;
       function contentBody() {
-        const labels = options.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+        if (!isDraft && eventPhase(detail)[1] !== "pending") { syncEditorChoices(); throw new Error("活動已開始，題目、選項同投票方式已鎖定。"); }
+        const labels = optionLabels(options.value);
         if (!name.value.trim() || !question.value.trim()) throw new Error("請填活動名稱同投票問題。");
         if (labels.length < 2 || labels.length > 20 || labels.some((label) => label.length > 100)) throw new Error("請填 2–20 個選項，每項最多 100 字。");
-        const value = { name: name.value.trim(), question: question.value.trim(), options: labels };
+        const value = { name: name.value.trim(), question: question.value.trim(), options: labels, maxChoices: readMaxChoices(mode, max, labels.length) };
         if (isDraft) {
           value.opensAt = hkTime(opens.value);
           value.closesAt = hkTime(closes.value);
@@ -397,6 +476,7 @@ function appendResultSettings(item, event) {
         } catch (error) { status.textContent = error.message; return; }
         const version = sessionVersion;
         working = true;
+        syncEditorChoices();
         save.disabled = true;
         publish.disabled = true;
         status.textContent = "正在發佈活動…";
@@ -411,14 +491,15 @@ function appendResultSettings(item, event) {
           closes.disabled = true;
           publish.hidden = true;
           const pending = eventPhase(event)[1] === "pending";
-          for (const input of [name, question, options]) input.disabled = !pending;
-          help.textContent = pending ? "活動已發佈，開始前仍可修改名稱、題目同選項。預定時間已鎖定。" : "活動已發佈並開始，名稱、題目同選項已鎖定。";
+          syncEditorChoices();
+          help.textContent = pending ? "活動已發佈，開始前仍可修改名稱、題目、選項同投票方式。預定時間已鎖定。" : "活動已發佈並開始，名稱、題目、選項同投票方式已鎖定。";
           summary.textContent = "編輯活動內容同外觀";
           refreshEventCard(item, event);
           status.textContent = pending ? "已發佈。到預定開始時間後接受投票，分享連結同 QR code 繼續有效。" : "已發佈，現正接受投票。分享連結同 QR code 繼續有效。";
         } catch (error) { if (!cancelled(error) && !stale(version)) status.textContent = error.message; }
         finally {
           working = false;
+          syncEditorChoices();
           save.disabled = !isDraft && eventPhase(event)[1] !== "pending";
           publish.disabled = false;
         }
@@ -433,6 +514,7 @@ function appendResultSettings(item, event) {
         let value;
         try { value = contentBody(); } catch (error) { status.textContent = error.message; return; }
         working = true;
+        syncEditorChoices();
         save.disabled = true;
         if (publish) publish.disabled = true;
         status.textContent = "正在儲存內容…";
@@ -448,7 +530,7 @@ function appendResultSettings(item, event) {
           refreshEventCard(item, event);
           status.textContent = "活動內容已更新，分享連結同 QR code 繼續有效。";
         } catch (error) { if (!cancelled(error) && !stale(version)) status.textContent = error.message; }
-        finally { working = false; save.disabled = !isDraft && eventPhase(event)[1] !== "pending"; if (publish) publish.disabled = false; }
+        finally { working = false; syncEditorChoices(); save.disabled = !isDraft && eventPhase(event)[1] !== "pending"; if (publish) publish.disabled = false; }
       });
     }
     section.append(form, status);
@@ -587,9 +669,10 @@ function renderEvents(events) {
     raw.disabled = phase !== "closed";
     tools.append(report, raw);
     const resultMode = node("p", "event-results-mode", event.resultsVisibility === "live" ? "結果：即時公開" : "結果：截止後公開");
+    const selection = node("p", "event-selection-summary", selectionSummary(event));
     const draftNote = node("p", "event-draft-note", "草稿只供預覽，發佈前唔接受投票。請展開「編輯草稿／發佈活動」核對內容同時間，再發佈。" );
     draftNote.hidden = phase !== "draft";
-    item.append(head, times, resultMode, draftNote, share, tools, progress);
+    item.append(head, times, resultMode, selection, draftNote, share, tools, progress);
     appendResultSettings(item, event);
     if (principal?.role === "owner") appendEventAccess(item, event);
     list.append(item);
@@ -789,7 +872,7 @@ async function submitEvent() {
       payload = JSON.parse(pendingCreation.payload);
     } else {
       if (!creationQuota || (creationQuota.limit === 1 && creationQuota.used >= 1)) return;
-      const options = $("event-options").value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      const options = optionLabels($("event-options").value);
       if (options.length < 2 || options.length > 20) throw new Error("請填 2–20 個選項，每行一項。");
       const lifecycle = $("save-draft").checked ? "draft" : "published";
       const opensAt = $("open-now").checked && lifecycle === "published" ? new Date().toISOString() : hkTime($("opens-at").value);
@@ -798,7 +881,7 @@ async function submitEvent() {
       if (creationQuota.limit === 1 && Date.parse(closesAt) - Date.parse(opensAt) > 86400_000) throw new Error("免費活動嘅投票期間最長 24 小時，請調整截止時間。");
       payload = {
         name: $("event-name").value, question: $("event-question").value, options, opensAt, closesAt,
-        resultsVisibility: $("results-visibility").value, lifecycle,
+        resultsVisibility: $("results-visibility").value, lifecycle, maxChoices: readMaxChoices($("event-selection-mode"), $("event-max-choices"), options.length),
       };
       if (creationQuota.limit === 1) rememberPendingCreation(payload);
     }
@@ -893,6 +976,9 @@ $("refresh-accounts").addEventListener("click", async () => {
 
 $("open-now").addEventListener("change", syncCreateTiming);
 $("save-draft").addEventListener("change", syncCreateTiming);
+$("event-selection-mode").addEventListener("change", syncCreateChoices);
+$("event-options").addEventListener("input", syncCreateChoices);
+$("event-max-choices").addEventListener("input", syncCreateChoices);
 
 $("event-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -927,13 +1013,13 @@ async function exportVotes(event, button, progress) {
           after = data.next || "";
         } while (after);
         completed++;
-        progress.textContent = `已讀取 ${completed}/128 個分區 · ${rows.length.toLocaleString("zh-HK")} 票`;
+        progress.textContent = `已讀取 ${completed}/128 個分區 · ${rows.length.toLocaleString("zh-HK")} 張投票`;
       }
     }));
     if (stale(version)) return;
     rows.sort((a, b) => a.voter_hash.localeCompare(b.voter_hash));
-    const content = "\uFEFF" + [["event_id", "voter_hash", "option_id", "recorded_at_utc"],
-      ...rows.map((row) => [event.id, row.voter_hash, row.option_id, new Date(row.created_at).toISOString()]),
+    const content = "\uFEFF" + [["event_id", "voter_hash", "option_id", "recorded_at_utc", "option_ids_json"],
+      ...rows.map((row) => [event.id, row.voter_hash, row.option_id, new Date(row.created_at).toISOString(), JSON.stringify(Array.isArray(row.option_ids) ? row.option_ids : row.option_id ? [row.option_id] : [])]),
     ].map((row) => row.map(csvCell).join(",")).join("\r\n");
     const blobUrl = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
@@ -941,7 +1027,7 @@ async function exportVotes(event, button, progress) {
     link.download = `wevote-${event.id}-votes.csv`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-    progress.textContent = `已匯出 ${rows.length.toLocaleString("zh-HK")} 票。檔案含匿名識別，請妥善保存。`;
+    progress.textContent = `已匯出 ${rows.length.toLocaleString("zh-HK")} 張投票。檔案含匿名識別，請妥善保存。`;
   } catch (error) {
     controller.abort();
     if (!cancelled(error) && !stale(version)) progress.textContent = `未有下載：${error.message} 請重新匯出。`;

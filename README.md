@@ -20,7 +20,7 @@ WeVote takes inspiration from Keith Li's emphasis on shared caching and reducing
 
 ## Features
 
-- Independent events with 2–20 options, drafts, preview, publication, and scheduled opening/closing.
+- Independent events with 2–20 options, single or multiple selections, drafts, preview, publication, and scheduled opening/closing.
 - Owner, administrator, and organizer roles; individual login keys and event assignments.
 - Optional public organizer registration through Google or Apple, with a bounded trial event.
 - A first-use admin guide for login, event setup, sharing, and reports; skip it or reopen it with “使用導覽”.
@@ -53,11 +53,17 @@ The 10,000-vote allowance is a storage limit. Simultaneous 10,000-person voting 
 
 ## What counts as one vote
 
-Public events issue an event-specific signed HttpOnly browser cookie and validate Cloudflare Turnstile on the server. The same browser identity is counted once; retrying the same choice is safe, and changing an already recorded choice is rejected.
+Each event defaults to **single choice**. Before voting begins, an organizer can enable **multiple choices** and set the maximum options per ballot, up to the event's option count. A voter selects between one and that maximum and submits the choices together. The mode and maximum are locked when voting begins; existing events remain single choice unless edited beforehand.
+
+One submission is **one ballot**, whether it contains one choice or several. Turnout and the trial's 10,000-vote cap count ballots, not the sum of selected options. Each selected option receives one count. Multi-choice result percentages divide each option's count by the recorded ballot count, so they can add up to more than 100%. The dashboard, summary CSV, and printed/PDF report identify the mode, maximum, and denominator. Single-choice percentages retain the same calculation.
+
+Public events issue an event-specific signed HttpOnly browser cookie and validate Cloudflare Turnstile on the server. The same browser identity is counted once; retrying the same selection set is safe, and changing an already recorded selection set is rejected. Repeated option IDs within a ballot are rejected.
 
 **This does not establish one vote per person.** Clearing cookies, private browsing, using a different browser, or switching devices can create another identity. A web page cannot read a device MAC address. Turnstile reduces automated abuse; it does not verify a person's eligibility. This mode suits event interaction and opinion collection.
 
 An optional legacy signed-ticket mode counts each valid ticket once. Organizers remain responsible for eligibility and distribution, and a ticket can be forwarded. See the [Cantonese guide](docs/README.zh-HK.md#可選舊式獨立票據) for the CLI workflow.
+
+Authorized raw CSV exports retain one row per ballot and append an `option_ids_json` column containing a JSON array of all chosen option IDs. The legacy `option_id` column contains the ID for a one-choice ballot and is empty for a ballot with multiple choices. Parse the JSON array to recover the complete selection set; it is not a delimiter-separated string. The legacy export CLI uses the same representation and accepts older single-choice API rows.
 
 ## Run locally
 

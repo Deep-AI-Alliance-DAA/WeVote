@@ -50,6 +50,7 @@ const route = `/api/events/${event.id}`;
 const open = (await api(`${route}/results`)).data;
 assert.equal(open.phase, "open");
 assert.equal(open.options.length, 20);
+assert.equal(open.maxChoices, 1, "Staff events default to one choice");
 assert.equal(open.counts, null);
 const identity = await api(`${route}/identity`);
 const cookie = identity.response.headers.get("Set-Cookie").split(";")[0];
@@ -58,6 +59,7 @@ await api(`${route}/vote`, { method: "POST", body: { optionId: "o1", turnstileTo
 await api(`${route}/vote`, { method: "POST", cookie: cookie + "bad", body: { optionId: "o1", turnstileToken: "test" } }, 403);
 await api(`${route}/vote`, { method: "POST", cookie, headers: { Origin: "https://other.example" }, body: { optionId: "o1" } }, 403);
 await api(`${route}/vote`, { method: "POST", cookie, body: { optionId: "invalid" } }, 400);
+await api(`${route}/vote`, { method: "POST", cookie, body: { optionIds: ["o1", "o2"], turnstileToken: "test", ballotVersion: open.ballotVersion } }, 400);
 await api(`${route}/vote`, { method: "POST", cookie, body: { optionId: "o1", ballotVersion: open.ballotVersion } }, 403);
 const cast = { method: "POST", cookie, body: { optionId: "o20", turnstileToken: "test", ballotVersion: open.ballotVersion } };
 await api(`${route}/vote`, { ...cast, body: { ...cast.body, ballotVersion: "stale-version" } }, 409);
@@ -84,4 +86,5 @@ const exports = await Promise.all(Array.from({ length: 128 }, (_, shard) => api(
 const rows = exports.flatMap(({ data }) => data.rows);
 assert.equal(rows.length, 1);
 assert.equal(rows[0].option_id, "o20");
+assert.deepEqual(rows[0].option_ids, ["o20"], "Older staff single-choice ballots export a complete one-item selection set");
 console.log(`Passed ${checks} local API checks: event timing, privacy, identity, duplicate votes, event isolation and complete export.`);

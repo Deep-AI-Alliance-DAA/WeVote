@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { oauthAvailability, startOrganizerOAuth, finishOrganizerOAuth } from "./organizer-auth.js";
-import { initTrialBallot, recordTrialVote, readTrialResults, exportTrialVotes } from "./trial-ballot.js";
+import { initTrialBallot, recordTrialVote, readTrialResults, exportTrialVotes, normalizeOptionIds, storedOptionIds, exportVoteRow } from "./trial-ballot.js";
 export { AdminDirectory } from "./admin-directory.js";
 
 const SHARDS = 128;
@@ -36,6 +36,7 @@ function settings(env) {
     id: env.POLL_ID,
     question: env.POLL_QUESTION,
     options,
+    maxChoices: 1,
     opensAt,
     closesAt,
     turnstileSiteKey: env.TURNSTILE_SITE_KEY,
@@ -285,6 +286,7 @@ async function results(request, env) {
     pollId: config.id,
     question: config.question,
     options: config.options,
+    maxChoices: config.maxChoices ?? 1,
     opensAt: new Date(config.opensAt).toISOString(),
     closesAt: new Date(config.closesAt).toISOString(),
     phase: state,
@@ -307,6 +309,7 @@ async function eventResults(request, env, id) {
     question: config.question,
     ballotVersion: config.ballotVersion || "legacy",
     options: config.options,
+    maxChoices: config.maxChoices ?? 1,
     opensAt: config.opensAt,
     closesAt: config.closesAt,
     phase: state,
@@ -343,7 +346,8 @@ async function eventVote(request, env, id) {
   if (origin && origin !== new URL(request.url).origin) return json({ error: "來源不符。" }, 403);
   if (!request.headers.get("Content-Type")?.startsWith("application/json")) return json({ error: "請提交 JSON。" }, 415);
   const body = await readJson(request);
-  if (!config.options.some((option) => option.id === body?.optionId)) return json({ error: "選項無效。" }, 400);
+  const optionIds = normalizeOptionIds(body, config.options.map(option => option.id), config.maxChoices);
+  if (!optionIds) return json({ error: "選項無效或超出可選數目。" }, 400);
   const voter = await voterFromCookie(request, config, env.VOTE_SIGNING_KEY);
   if (!voter) return json({ error: "瀏覽器投票識別已失效，請重新整理頁面。" }, 403);
   if (body.ballotVersion !== (config.ballotVersion || "legacy") && !(body.ballotVersion === undefined && !config.ballotVersion)) {
@@ -355,13 +359,13 @@ async function eventVote(request, env, id) {
   if (!human) return json({ error: "人機驗證失敗，請重新驗證。" }, 403);
   if (phase(config) !== "open") return json({ error: "投票目前未開放。" }, 403);
   if (config.trial) {
-    const result = await coordinator(env, id).recordTrialVote({ voterHash: voter.voterHash, optionId: body.optionId, ballotVersion: body.ballotVersion });
+    const result = await coordinator(env, id).recordTrialVote({ voterHash: voter.voterHash, optionIds, ballotVersion: body.ballotVersion ?? "legacy" });
     return json(result.body, result.status);
   }
   const response = await shard(env, id, voter.shard).fetch("https://shard.internal/vote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ eventId: id, ballotVersion: config.ballotVersion || "legacy", voterHash: voter.voterHash, optionId: body.optionId, createdAt: Date.now(), closesAt: timestamp(config.closesAt) }),
+    body: JSON.stringify({ eventId: id, ballotVersion: config.ballotVersion || "legacy", voterHash: voter.voterHash, optionIds, createdAt: Date.now(), closesAt: timestamp(config.closesAt) }),
   });
   const result = await response.json();
   return json(result, response.status);
@@ -430,6 +434,7 @@ async function adminEvents(request, env) {
   const name = typeof input?.name === "string" ? input.name.trim() : "";
   const question = typeof input?.question === "string" ? input.question.trim() : "";
   const labels = input?.options;
+  const maxChoices = input?.maxChoices === undefined ? 1 : input.maxChoices;
   const resultsVisibility = input?.resultsVisibility || "after-close";
   const lifecycle = input?.lifecycle ?? "published";
   const presentation = validatePresentation(input?.presentation || {});
@@ -439,12 +444,13 @@ async function adminEvents(request, env) {
       !["live", "after-close"].includes(resultsVisibility) || !["draft", "published"].includes(lifecycle) ||
       !Array.isArray(labels) || labels.length < 2 || labels.length > MAX_OPTIONS ||
       labels.some((label) => typeof label !== "string" || !label.trim() || label.trim().length > 100) ||
+      !Number.isSafeInteger(maxChoices) || maxChoices < 1 || maxChoices > labels.length ||
       !Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= Math.max(opensAt, Date.now()) ||
       closesAt - opensAt > 90 * 86400_000) return json({ error: "請檢查活動名稱、題目、選項同時間。" }, 400);
   if (limited && closesAt - opensAt > TRIAL.maxDurationHours * 3600_000) return json({ error: "免費試用活動嘅投票期最多 24 小時。" }, 400);
   const id = randomHex(12);
   let event = {
-    id, name, question, ownerId: principal.id, ballotVersion: randomHex(8), lifecycle, resultsVisibility, presentation,
+    id, name, question, ownerId: principal.id, ballotVersion: randomHex(8), lifecycle, resultsVisibility, presentation, maxChoices,
     options: labels.map((label, index) => ({ id: `o${index + 1}`, label: label.trim() })),
     opensAt: new Date(opensAt).toISOString(),
     closesAt: new Date(closesAt).toISOString(),
@@ -474,8 +480,8 @@ async function vote(request, env) {
   if (origin && origin !== new URL(request.url).origin) return json({ error: "來源不符。" }, 403);
   if (!request.headers.get("Content-Type")?.startsWith("application/json")) return json({ error: "請提交 JSON。" }, 415);
   const body = await readJson(request);
-  const optionId = body?.optionId;
-  if (!config.options.some((option) => option.id === optionId)) return json({ error: "選項無效。" }, 400);
+  const optionIds = normalizeOptionIds(body, config.options.map(option => option.id), config.maxChoices);
+  if (!optionIds) return json({ error: "選項無效或超出可選數目。" }, 400);
   const voter = await voterFromTicket(body?.ticket, config, env.VOTE_SIGNING_KEY);
   if (!voter) return json({ error: "投票連結無效或已過期。" }, 403);
   let human;
@@ -486,7 +492,7 @@ async function vote(request, env) {
   const response = await shard(env, config.id, voter.shard).fetch("https://shard.internal/vote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ voterHash: voter.voterHash, optionId, createdAt: Date.now(), closesAt: timestamp(config.closesAt) }),
+    body: JSON.stringify({ voterHash: voter.voterHash, optionIds, createdAt: Date.now(), closesAt: timestamp(config.closesAt) }),
   });
   const result = await response.json();
   if (!response.ok) return json(result, response.status);
@@ -646,9 +652,11 @@ async function adminEventDetail(request, env, id, action = "content") {
     return json(settings);
   }
   const { name, question, options } = input || {};
+  const maxChoices = input?.maxChoices === undefined ? (config.maxChoices ?? 1) : input.maxChoices;
   if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || typeof question !== "string" || !question.trim() || question.trim().length > 300 ||
-      !Array.isArray(options) || options.length < 2 || options.length > MAX_OPTIONS || options.some((label) => typeof label !== "string" || !label.trim() || label.trim().length > 100)) return json({ error: "請檢查活動名稱、題目同 2–20 個選項。" }, 400);
-  const update = { name: name.trim(), question: question.trim(), options: options.map((label, index) => ({ id: `o${index + 1}`, label: label.trim() })), ballotVersion: randomHex(8) };
+      !Array.isArray(options) || options.length < 2 || options.length > MAX_OPTIONS || options.some((label) => typeof label !== "string" || !label.trim() || label.trim().length > 100) ||
+      !Number.isSafeInteger(maxChoices) || maxChoices < 1 || maxChoices > options.length) return json({ error: "請檢查活動名稱、題目、2–20 個選項同可選數目。" }, 400);
+  const update = { name: name.trim(), question: question.trim(), options: options.map((label, index) => ({ id: `o${index + 1}`, label: label.trim() })), maxChoices, ballotVersion: randomHex(8) };
   if (input.opensAt !== undefined || input.closesAt !== undefined) {
     if (phase(config) !== "draft") return json({ error: "只有草稿可以更改投票時間。" }, 409);
     const opensAt = Date.parse(input.opensAt ?? config.opensAt);
@@ -769,7 +777,7 @@ export class EventCoordinator extends DurableObject {
     const { id, name, opensAt, closesAt, createdAt } = config;
     const { resultsVisibility } = this.displaySettings();
     try {
-      await this.env.EVENTS.put(`event:${id}`, JSON.stringify(config), { metadata: { id, name, opensAt, closesAt, createdAt, lifecycle: config.lifecycle || "published", ownerId: config.ownerId || "root", resultsVisibility } });
+      await this.env.EVENTS.put(`event:${id}`, JSON.stringify(config), { metadata: { id, name, opensAt, closesAt, createdAt, lifecycle: config.lifecycle || "published", ownerId: config.ownerId || "root", resultsVisibility, maxChoices: config.maxChoices ?? 1 } });
     } catch {
       console.error(JSON.stringify({ event: "event_catalog_retry", eventId: id }));
       await this.ctx.storage.setAlarm(Date.now() + 60_000);
@@ -803,6 +811,7 @@ export class EventCoordinator extends DurableObject {
     if (!config || !["draft", "pending"].includes(phase(config))) return null;
     if ((update.opensAt !== undefined || update.closesAt !== undefined) && phase(config) !== "draft") return null;
     const event = { ...config, ...update };
+    if (!Number.isSafeInteger(event.maxChoices ?? 1) || (event.maxChoices ?? 1) < 1 || (event.maxChoices ?? 1) > event.options.length) return null;
     if (config.trial && timestamp(event.closesAt) - timestamp(event.opensAt) > TRIAL.maxDurationHours * 3600_000) return null;
     this.sql.exec("UPDATE event_config SET config_json = ? WHERE singleton = 1", JSON.stringify(event));
     this.snapshotValue = null;
@@ -866,52 +875,73 @@ export class VoteShard extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    this.sql.exec("CREATE TABLE IF NOT EXISTS votes (voter_hash TEXT PRIMARY KEY, option_id TEXT NOT NULL, created_at INTEGER NOT NULL)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS votes (voter_hash TEXT PRIMARY KEY, option_id TEXT NOT NULL, created_at INTEGER NOT NULL, option_ids_json TEXT)");
+    if (!this.sql.exec("PRAGMA table_info(votes)").toArray().some(column => column.name === "option_ids_json")) {
+      this.sql.exec("ALTER TABLE votes ADD COLUMN option_ids_json TEXT");
+    }
     this.sql.exec("CREATE TABLE IF NOT EXISTS counts (option_id TEXT PRIMARY KEY, total INTEGER NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS ballot (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version TEXT NOT NULL, options_json TEXT NOT NULL)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS vote_totals (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), total INTEGER NOT NULL CHECK(total >= 0))");
+    // Initialize once from the preserved ledger. Results never derive turnout
+    // by adding option counts, because one ballot can select several options.
+    if (!this.sql.exec("SELECT total FROM vote_totals WHERE singleton = 1").toArray().length) {
+      this.sql.exec("INSERT INTO vote_totals (singleton, total) SELECT 1, COUNT(*) FROM votes");
+    }
+    this.sql.exec("CREATE TABLE IF NOT EXISTS ballot (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version TEXT NOT NULL, options_json TEXT NOT NULL, max_choices INTEGER NOT NULL DEFAULT 1)");
+    if (!this.sql.exec("PRAGMA table_info(ballot)").toArray().some(column => column.name === "max_choices")) {
+      this.sql.exec("ALTER TABLE ballot ADD COLUMN max_choices INTEGER NOT NULL DEFAULT 1");
+    }
   }
 
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/vote" && request.method === "POST") {
       const data = await request.json();
-      if (!/^[a-f0-9]{64}$/.test(data?.voterHash || "") || !/^[a-zA-Z0-9_-]{1,32}$/.test(data?.optionId || "") || !Number.isSafeInteger(data?.createdAt)) return json({ error: "資料無效。" }, 400);
+      if (!data || typeof data !== "object" || Array.isArray(data) || !/^[a-f0-9]{64}$/.test(data.voterHash || "") || !Number.isSafeInteger(data.createdAt)) return json({ error: "資料無效。" }, 400);
+      const requestedIds = Object.hasOwn(data, "optionIds") ? data.optionIds : [data.optionId];
+      if (!Array.isArray(requestedIds) || requestedIds.length < 1 || requestedIds.length > MAX_OPTIONS || !normalizeOptionIds(data, requestedIds, requestedIds.length)) return json({ error: "選項無效。" }, 400);
+      let optionIds;
       if (data.closesAt !== undefined && (!Number.isFinite(data.closesAt) || Date.now() >= data.closesAt)) return json({ error: "投票已截止。" }, 403);
       if (data.eventId) {
         if (!eventPattern.test(data.eventId)) return json({ error: "活動無效。" }, 400);
-        let ballot = this.sql.exec("SELECT version, options_json FROM ballot WHERE singleton = 1").toArray()[0];
+        let ballot = this.sql.exec("SELECT version, options_json, max_choices FROM ballot WHERE singleton = 1").toArray()[0];
         if (!ballot) {
           // A shard pins the authoritative ballot after opening. A request
           // holding a pre-edit config cannot record a vote against old labels.
           const config = await coordinator(this.env, data.eventId).getConfig();
           if (!config || phase(config) !== "open") return json({ error: "投票目前未開放。" }, 403);
-          this.sql.exec("INSERT OR IGNORE INTO ballot (singleton, version, options_json) VALUES (1, ?, ?)", config.ballotVersion || "legacy", JSON.stringify(config.options.map((option) => option.id)));
-          ballot = this.sql.exec("SELECT version, options_json FROM ballot WHERE singleton = 1").one();
+          const maxChoices = config.maxChoices === undefined ? 1 : config.maxChoices;
+          if (!Number.isSafeInteger(maxChoices) || maxChoices < 1 || maxChoices > config.options.length) return json({ error: "投票設定無效。" }, 503);
+          this.sql.exec("INSERT OR IGNORE INTO ballot (singleton, version, options_json, max_choices) VALUES (1, ?, ?, ?)", config.ballotVersion || "legacy", JSON.stringify(config.options.map((option) => option.id)), maxChoices);
+          ballot = this.sql.exec("SELECT version, options_json, max_choices FROM ballot WHERE singleton = 1").one();
         }
-        if (ballot.version !== data.ballotVersion || !JSON.parse(ballot.options_json).includes(data.optionId)) return json({ error: "投票內容已更新，請重新整理後再投票。" }, 409);
+        if (ballot.version !== data.ballotVersion) return json({ error: "投票內容已更新，請重新整理後再投票。" }, 409);
+        optionIds = normalizeOptionIds(data, JSON.parse(ballot.options_json), ballot.max_choices);
         if (Date.now() >= data.closesAt) return json({ error: "投票已截止。" }, 403);
-      }
+      } else optionIds = normalizeOptionIds(data, requestedIds, 1);
+      if (!optionIds) return json({ error: "選項無效或超出可選數目。" }, 400);
+      const selection = JSON.stringify(optionIds);
       const inserted = this.ctx.storage.transactionSync(() => {
-        const write = this.sql.exec("INSERT OR IGNORE INTO votes (voter_hash, option_id, created_at) VALUES (?, ?, ?)", data.voterHash, data.optionId, data.createdAt);
+        const write = this.sql.exec("INSERT OR IGNORE INTO votes (voter_hash, option_id, created_at, option_ids_json) VALUES (?, ?, ?, ?)", data.voterHash, optionIds.length === 1 ? optionIds[0] : "", data.createdAt, selection);
         if (write.rowsWritten === 0) return false;
-        this.sql.exec("INSERT INTO counts (option_id, total) VALUES (?, 1) ON CONFLICT(option_id) DO UPDATE SET total = total + 1", data.optionId);
+        for (const id of optionIds) this.sql.exec("INSERT INTO counts (option_id, total) VALUES (?, 1) ON CONFLICT(option_id) DO UPDATE SET total = total + 1", id);
+        this.sql.exec("UPDATE vote_totals SET total = total + 1 WHERE singleton = 1");
         return true;
       });
       await this.ctx.storage.sync();
       if (inserted) return json({ ok: true, recorded: true });
-      const original = this.sql.exec("SELECT option_id FROM votes WHERE voter_hash = ?", data.voterHash).one();
-      if (original?.option_id === data.optionId) return json({ ok: true, recorded: true, duplicate: true });
-      return json({ error: "呢條投票連結已經投咗另一個選項。" }, 409);
+      const original = this.sql.exec("SELECT option_id, option_ids_json FROM votes WHERE voter_hash = ?", data.voterHash).one();
+      if (JSON.stringify(storedOptionIds(original)) === selection) return json({ ok: true, recorded: true, duplicate: true });
+      return json({ error: "呢條投票連結已經提交咗另一組選項。" }, 409);
     }
     if (url.pathname === "/count" && request.method === "GET") {
       const counts = Object.fromEntries(this.sql.exec("SELECT option_id, total FROM counts").toArray().map((row) => [row.option_id, row.total]));
-      const turnout = Object.values(counts).reduce((sum, count) => sum + count, 0);
+      const turnout = this.sql.exec("SELECT total FROM vote_totals WHERE singleton = 1").one().total;
       return json({ turnout, counts });
     }
     if (url.pathname === "/export" && request.method === "GET") {
       const after = url.searchParams.get("after") || "";
       if (after && !/^[a-f0-9]{64}$/.test(after)) return json({ error: "Cursor 無效。" }, 400);
-      const rows = this.sql.exec("SELECT voter_hash, option_id, created_at FROM votes WHERE voter_hash > ? ORDER BY voter_hash LIMIT 500", after).toArray();
+      const rows = this.sql.exec("SELECT voter_hash, option_id, option_ids_json, created_at FROM votes WHERE voter_hash > ? ORDER BY voter_hash LIMIT 500", after).toArray().map(exportVoteRow);
       return json({ rows, next: rows.length === 500 ? rows[rows.length - 1].voter_hash : null });
     }
     return json({ error: "找不到頁面。" }, 404);

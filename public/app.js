@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 const elements = Object.fromEntries([
   "phase-label", "poll-id", "close-time", "status-pill", "question-title", "vote-subtitle", "vote-form",
   "options", "turnstile", "vote-button", "vote-message", "turnout", "phase-detail", "countdown",
-  "updated-at", "result-area", "result-bars", "draft-options",
+  "updated-at", "result-area", "result-bars", "draft-options", "choice-guidance", "result-note",
 ].map((id) => [id, $(id)]));
 
 let poll = null;
@@ -44,21 +44,30 @@ function formatTime(value) {
   return new Intl.DateTimeFormat("zh-HK", { timeZone: "Asia/Hong_Kong", dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-function renderOptions(options) {
+function choiceLimit(data = poll) {
+  return Number.isSafeInteger(data?.maxChoices) && data.maxChoices > 0 && data.maxChoices <= data.options.length ? data.maxChoices : 1;
+}
+
+function selectedChoices() {
+  return [...elements.options.querySelectorAll("input:checked")].map((input) => input.value);
+}
+
+function renderOptions(options, maxChoices, selected = []) {
   const box = elements.options;
   box.replaceChildren();
   const legend = document.createElement("legend");
   legend.className = "sr-only";
-  legend.textContent = "選擇一個答案";
+  legend.textContent = maxChoices > 1 ? `選擇 1 至 ${maxChoices} 個答案` : "選擇一個答案";
   box.append(legend);
   for (const option of options) {
     const label = document.createElement("label");
     label.className = "option";
     const input = document.createElement("input");
-    input.type = "radio";
+    input.type = maxChoices > 1 ? "checkbox" : "radio";
     input.name = "option";
     input.value = option.id;
-    input.required = true;
+    input.required = maxChoices === 1;
+    input.checked = selected.includes(option.id);
     const text = document.createElement("span");
     text.textContent = option.label;
     label.append(input, text);
@@ -72,6 +81,8 @@ function renderResults(data) {
   area.hidden = false;
   const title = area.querySelector("h3");
   if (title) title.textContent = hasCounts ? data.phase === "closed" ? "最終結果" : "即時投票分佈" : "各選項結果";
+  elements["result-note"].hidden = choiceLimit(data) === 1;
+  elements["result-note"].textContent = "每張投票可支持多個選項。百分比以已記錄投票張數計算，合計可超過 100%。";
   const list = elements["result-bars"];
   list.replaceChildren();
   if (!hasCounts || data.turnout === 0) {
@@ -130,17 +141,30 @@ function renderCountdown() {
 }
 
 function updateButton() {
-  elements["vote-button"].disabled = busy || recorded || poll?.phase !== "open" || Date.now() >= Date.parse(poll.closesAt) || !(publicEvent ? identityReady : ticket) || !turnstileToken || !elements.options.querySelector("input:checked");
+  const maxChoices = choiceLimit();
+  const count = selectedChoices().length;
+  const cannotVote = busy || recorded || poll?.phase !== "open" || Date.now() >= Date.parse(poll?.closesAt) || !(publicEvent ? identityReady : ticket);
+  const guidance = `${maxChoices > 1 ? `可選 1–${maxChoices} 項` : "只可選 1 項"} · 已選 ${count} 項${maxChoices > 1 && count === maxChoices ? "（已達上限，可取消已選項目）" : ""}`;
+  if (elements["choice-guidance"].textContent !== guidance) elements["choice-guidance"].textContent = guidance;
+  for (const input of elements.options.querySelectorAll("input")) {
+    input.disabled = cannotVote || (maxChoices > 1 && count >= maxChoices && !input.checked);
+  }
+  elements["vote-button"].disabled = cannotVote || !turnstileToken || count === 0 || count > maxChoices;
 }
 
 function renderPoll(data) {
+  const previousPoll = poll;
   const first = !poll || poll.pollId !== data.pollId;
   poll = data;
   const canVote = publicEvent ? identityReady : Boolean(ticket);
   if (canVote) recorded = sessionStorage.getItem(recordedKey) === "yes";
-  const optionsVersion = JSON.stringify([data.ballotVersion, data.options]);
+  const maxChoices = choiceLimit(data);
+  const optionsVersion = JSON.stringify([data.pollId, data.ballotVersion, maxChoices, data.options]);
   if (renderedOptions !== optionsVersion) {
-    renderOptions(data.options);
+    const sameBallot = previousPoll?.pollId === data.pollId && previousPoll?.ballotVersion === data.ballotVersion && choiceLimit(previousPoll) === maxChoices;
+    const selected = selectedChoices();
+    renderOptions(data.options, maxChoices, sameBallot ? selected : []);
+    if (!sameBallot && selected.length && !recorded) message("投票選項已更新，請重新選擇後確認。", "bad");
     renderedOptions = optionsVersion;
   }
   const draftOptions = elements["draft-options"];
@@ -179,6 +203,7 @@ function renderPoll(data) {
     else if (data.phase === "closed") turnoutNote.textContent = data.turnout === 0 ? "活動已截止，未有已記錄投票。開啟連結或掃碼唔會計票。" : "只計已成功提交嘅投票。正式結果已喺下方公布。";
     else if (data.phase === "pending") turnoutNote.textContent = "活動未開始。開啟連結或掃碼唔會計票，成功提交投票後先會記錄。";
     else turnoutNote.textContent = `${data.turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票，唔包括開啟連結或掃碼次數。"}每 1 秒自動更新票數，剛提交可能要稍等。`;
+    if (maxChoices > 1) turnoutNote.textContent += ` 每張投票最多可選 ${maxChoices} 項，參與情況每張投票只計一次。`;
   }
   elements["updated-at"].textContent = new Intl.DateTimeFormat("zh-HK", { timeZone: "Asia/Hong_Kong", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(data.updatedAt));
   const labels = { draft: "草稿預覽", pending: "等待開始", open: "投票進行中", closed: "投票已結束" };
@@ -191,9 +216,9 @@ function renderPoll(data) {
   else if (data.phase === "closed") elements["vote-subtitle"].textContent = "投票已截止，多謝參與。";
   else if (!canVote) elements["vote-subtitle"].textContent = publicEvent ? "正在準備投票識別，請稍候。" : "請使用主辦方派發嘅獨立投票連結進入。";
   else if (recorded) elements["vote-subtitle"].textContent = "你嘅投票已經記錄。";
-  else elements["vote-subtitle"].textContent = "揀一個選項，通過驗證後確認。提交後唔可以更改。";
+  else elements["vote-subtitle"].textContent = `${maxChoices > 1 ? `可揀 1 至 ${maxChoices} 個選項` : "揀一個選項"}，通過驗證後確認。提交後唔可以更改。`;
   if (data.phase === "open" && canVote && !recorded && turnstileWidget === null) void loadTurnstile(data.turnstileSiteKey);
-  if (publicEvent) document.getElementById("privacy-note").textContent = "同一瀏覽器每個活動只記錄一票；清除瀏覽器資料仍可能再次投票。公開結果唔會顯示個人選擇。";
+  if (publicEvent) document.getElementById("privacy-note").textContent = `同一瀏覽器每個活動只記錄一張投票${maxChoices > 1 ? `，可支持最多 ${maxChoices} 個選項` : ""}；清除瀏覽器資料仍可能再次投票。公開結果唔會顯示個人選擇。`;
   renderResults(data);
   renderCountdown();
   updateButton();
@@ -254,11 +279,18 @@ async function loadIdentity() {
   }
 }
 
-elements.options.addEventListener("change", updateButton);
+elements.options.addEventListener("change", (event) => {
+  if (selectedChoices().length > choiceLimit()) {
+    event.target.checked = false;
+    message(`最多可選 ${choiceLimit()} 項。取消已選項目後可以換另一項。`, "bad");
+  }
+  updateButton();
+});
 elements["vote-form"].addEventListener("submit", async (event) => {
   event.preventDefault();
-  const choice = elements.options.querySelector("input:checked");
-  if (!choice || !turnstileToken || !(publicEvent ? identityReady : ticket) || busy || poll?.phase !== "open" || Date.now() >= Date.parse(poll.closesAt)) return;
+  const choices = selectedChoices();
+  const maxChoices = choiceLimit();
+  if (!choices.length || choices.length > maxChoices || !turnstileToken || !(publicEvent ? identityReady : ticket) || busy || recorded || poll?.phase !== "open" || Date.now() >= Date.parse(poll.closesAt)) return;
   busy = true;
   updateButton();
   message("正在保存你嘅投票…");
@@ -267,7 +299,7 @@ elements["vote-form"].addEventListener("submit", async (event) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ ...(publicEvent ? { ballotVersion: poll.ballotVersion } : { ticket }), optionId: choice.value, turnstileToken }),
+      body: JSON.stringify({ ...(publicEvent ? { ballotVersion: poll.ballotVersion } : { ticket }), ...(maxChoices > 1 ? { optionIds: choices } : { optionId: choices[0] }), turnstileToken }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "投票未能送出。");

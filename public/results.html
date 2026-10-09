@@ -7,7 +7,7 @@
   <title>活動結果 · WeVote</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/results.css">
-  <script src="/results.js?v=20261009-refresh-1s" type="module"></script>
+  <script src="/results.js?v=20261009-multiple-choice" type="module"></script>
 </head>
 <body>
   <div class="shell report-shell">
@@ -32,8 +32,8 @@
       <div id="report-content" hidden>
         <section class="report-overview" aria-label="投票摘要">
           <div class="card report-turnout">
-            <div class="card-heading"><span class="step">參與人數</span><span id="report-phase" class="status-pill"></span></div>
-            <div class="turnout"><strong id="report-turnout">—</strong><span>票已記錄</span></div>
+            <div class="card-heading"><span class="step">已記錄選票</span><span id="report-phase" class="status-pill"></span></div>
+            <div class="turnout"><strong id="report-turnout">—</strong><span>張選票已記錄</span></div>
             <p id="report-visibility" class="report-note"></p>
           </div>
           <div class="card report-timing">
@@ -43,24 +43,25 @@
               <div><dt>截止時間</dt><dd id="report-closes"></dd></div>
               <div><dt>資料更新</dt><dd id="report-updated"></dd></div>
               <div><dt>時區</dt><dd>香港時間（UTC+8）</dd></div>
+              <div><dt>投票模式</dt><dd id="report-choice-mode">單選 · 每張選票選 1 項</dd></div>
             </dl>
           </div>
         </section>
 
         <section id="waiting-results" class="card report-waiting" aria-labelledby="waiting-title">
           <svg aria-hidden="true" width="40" height="40" viewBox="0 0 48 48" fill="none"><path d="m13 21 1-7c1-12 21-12 21 1l-1 6M10 21l28 1 1 21-30-1 1-21Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="m24 29-1 6" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/></svg>
-          <div><h2 id="waiting-title">投票截止後公布結果</h2><p id="waiting-copy">活動進行期間只顯示參與人數。各選項票數及百分比會喺截止後公開。</p></div>
+          <div><h2 id="waiting-title">投票截止後公布結果</h2><p id="waiting-copy">活動進行期間只顯示已記錄選票數。各選項結果會喺截止後公開。</p></div>
         </section>
 
         <section id="final-results" class="card report-results" hidden aria-labelledby="results-title">
           <div class="report-section-heading"><div><span class="step">投票分佈</span><h2 id="results-title">活動結果</h2></div><p id="result-total"></p></div>
           <p id="results-empty" class="report-empty" hidden>暫時未有人投票。</p>
           <table class="results-table">
-            <caption class="sr-only">各投票選項嘅票數及百分比</caption>
-            <thead><tr><th scope="col">選項</th><th scope="col">票數</th><th scope="col">百分比</th></tr></thead>
+            <caption class="sr-only">各投票選項嘅選取次數及佔已記錄選票嘅比例</caption>
+            <thead><tr><th scope="col">選項</th><th id="result-count-heading" scope="col">票數</th><th id="result-percent-heading" scope="col">百分比</th></tr></thead>
             <tbody id="results-rows"></tbody>
           </table>
-          <p class="report-note">百分比按已記錄票數計算，四捨五入至小數點後一位。</p>
+          <p id="result-percent-note" class="report-note">百分比按已記錄票數計算，四捨五入至小數點後一位。</p>
         </section>
 
         <section class="report-export" aria-label="匯出報告">

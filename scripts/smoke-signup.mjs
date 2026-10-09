@@ -85,6 +85,10 @@ await api("/api/__local_test__/seed-account", { method: "POST", owner: true, req
 const first = await seed("first");
 equal((await quota(first)).used, 0, "Fresh signup has not spent its event");
 equal((await quota(first)).limit, 1, "Signup is lifetime limited");
+for (const maxChoices of [0, -1, 1.5, "2", null, 3]) {
+  await create(first, eventBody({ maxChoices }), randomUUID(), 400);
+}
+equal((await quota(first)).used, 0, "Invalid selection limits do not spend trial creation quota");
 await api("/api/admin/accounts", { cookie: first.cookie, status: 403 });
 await api("/api/admin/accounts", { method: "POST", cookie: first.cookie, body: { name: "Privilege attempt", role: "admin" }, status: 403 });
 await api(`/api/admin/accounts/${first.principal.id}`, { method: "PATCH", cookie: first.cookie, body: { role: "admin" }, status: 403 });
@@ -102,6 +106,7 @@ const firstCreated = await create(first, firstBody, firstRequest);
 const draft = firstCreated.data.event;
 equal(draft.ownerId, first.principal.id, "Client cannot choose another event owner");
 equal(draft.lifecycle, "draft", "Draft creation spends the lifetime event");
+equal(draft.maxChoices, 1, "Events without a selection limit remain single choice");
 equal(draft.trial.voteLimit, 10_000, "Client cannot raise trial vote cap");
 equal(draft.trial.maxDurationHours, 24, "Client cannot raise trial duration");
 equal(firstCreated.data.creationQuota.used, 1, "Creation returns consumed quota");
@@ -112,8 +117,11 @@ const reordered = Object.fromEntries(Object.entries(firstBody).reverse());
 equal((await create(first, reordered, firstRequest)).data.event.id, draft.id, "Object key ordering does not break idempotent retry");
 const conflict = await create(first, { ...firstBody, name: "Changed retry payload" }, firstRequest, 409);
 equal(conflict.data.code, "idempotency_conflict", "Changed request body reports explicit conflict");
-const edited = { name: "Edited draft stays edited", question: draft.question, options: draft.options.map(option => option.label) };
-await api(`/api/admin/events/${draft.id}`, { method: "PATCH", cookie: first.cookie, body: edited });
+const edited = { name: "Edited draft stays edited", question: draft.question, options: draft.options.map(option => option.label), maxChoices: 2 };
+const draftEdit = await api(`/api/admin/events/${draft.id}`, { method: "PATCH", cookie: first.cookie, body: edited });
+equal(draftEdit.data.event.maxChoices, 2, "A draft may enable multiple choices");
+equal((await api(`/api/events/${draft.id}/results`)).data.maxChoices, 2, "Draft preview exposes its selection limit");
+await api(`/api/admin/events/${draft.id}`, { method: "PATCH", cookie: first.cookie, body: { ...edited, maxChoices: 3 }, status: 400 });
 equal((await create(first, firstBody, firstRequest)).data.event.name, edited.name, "Retry never overwrites later draft edits");
 await api(`/api/admin/events/${draft.id}`, { method: "PATCH", cookie: first.cookie, body: { ...edited,
   opensAt: draft.opensAt, closesAt: new Date(Date.parse(draft.opensAt) + 86_400_001).toISOString() }, status: 400 });
@@ -191,6 +199,27 @@ const route = `/api/events/${live.id}`;
 const initial = (await api(`${route}/results`)).data;
 equal(initial.phase, "open", "Trial voting opens normally");
 equal(initial.trial.voteLimit, 10_000, "Public trial metadata matches server cap");
+equal(initial.maxChoices, 1, "Existing single-choice public metadata remains compatible");
+
+// These two ballots share the existing short closing deadline, so multi-choice
+// coverage does not add another scheduled-close wait to the integration suite.
+const multiple = await seed("multiple-choice");
+const multipleBody = eventBody({ name: "Trial multiple selections", question: "Select up to two", options: ["A", "B", "C"], maxChoices: 2,
+  lifecycle: "published", opensAt: live.opensAt, closesAt: live.closesAt });
+const multipleEvent = (await create(multiple, multipleBody)).data.event;
+equal(multipleEvent.maxChoices, 2, "Trial creation persists a multi-choice limit");
+const staffOpensAt = new Date(Date.now() + 8000).toISOString();
+const staffEvent = (await api("/api/admin/events", { method: "POST", owner: true, status: 201,
+  body: { ...multipleBody, name: "Staff multiple selections", opensAt: staffOpensAt, maxChoices: 3 } })).data.event;
+check(!staffEvent.trial, "Staff multi-choice event still uses ordinary shard storage");
+equal((await api(`/api/events/${staffEvent.id}/results`)).data.phase, "pending", "Staff multi-choice event starts pending");
+const staffContent = { name: staffEvent.name, question: staffEvent.question, options: staffEvent.options.map(option => option.label), maxChoices: 2 };
+await api(`/api/admin/events/${staffEvent.id}`, { method: "PATCH", owner: true, body: { ...staffContent, maxChoices: 4 }, status: 400 });
+const staffEdit = (await api(`/api/admin/events/${staffEvent.id}`, { method: "PATCH", owner: true, body: staffContent })).data.event;
+equal(staffEdit.maxChoices, 2, "Pending staff event may lower its selection limit");
+check(staffEdit.ballotVersion !== staffEvent.ballotVersion, "Changing pending selection limits changes the ballot version");
+equal((await api(`/api/events/${staffEvent.id}/results`)).data.maxChoices, 2, "Pending result metadata reflects its edited limit");
+
 const cookies = [];
 for (let i = 0; i < 2; i++) {
   const identity = await api(`${route}/identity`);
@@ -201,6 +230,8 @@ for (let i = 0; i < 2; i++) {
   check(cast.data.recorded && !cast.data.duplicate, "Trial vote is recorded once");
   if (i === 0) {
     check((await api(`${route}/vote`, { method: "POST", cookie, body: vote })).data.duplicate, "Exact trial vote retry is idempotent");
+    const { optionId, ...retry } = vote;
+    check((await api(`${route}/vote`, { method: "POST", cookie, body: { ...retry, optionIds: [optionId] } })).data.duplicate, "One-item array retries an older single-choice request safely");
     await api(`${route}/vote`, { method: "POST", cookie, body: { ...vote, optionId: "o2" }, status: 409 });
   }
 }
@@ -213,6 +244,62 @@ equal(storage.coordinatorTurnout, 2, "Trial ballots are held by their event coor
 check(storage.shardTurnouts.every(total => total === 0), "Trial votes never enter legacy vote shards");
 await api(`/api/admin/events/${live.id}/export?shard=0`, { cookie: voting.cookie, status: 403 });
 await api(`/api/admin/events/${live.id}/export?shard=0`, { cookie: first.cookie, status: 403 });
+
+async function exerciseMultiple(event, manager, staff = false) {
+  const path = `/api/events/${event.id}`;
+  const opening = (await api(`${path}/results`)).data;
+  equal(opening.phase, "open", "Multi-choice voting is open");
+  equal(opening.maxChoices, 2, "Multi-choice public metadata carries the server limit");
+  const content = { name: event.name, question: event.question, options: event.options.map(option => option.label), maxChoices: 1 };
+  await api(`/api/admin/events/${event.id}`, { method: "PATCH", ...manager, body: content, status: 409 });
+  const identities = [];
+  for (let i = 0; i < 2; i++) {
+    const identity = await api(`${path}/identity`);
+    identities.push(identity.response.headers.get("Set-Cookie").split(";")[0]);
+  }
+  const verification = { ballotVersion: opening.ballotVersion, turnstileToken: "test" };
+  const malformed = [{}, { optionIds: [] }, { optionIds: null }, { optionIds: "o1" }, { optionIds: [1] },
+    { optionIds: ["invalid"] }, { optionIds: ["o1", "o1"] }, { optionIds: ["o1", "o2", "o3"] }, { optionId: "o1", optionIds: ["o1"] }];
+  for (const selection of malformed) {
+    await api(`${path}/vote`, { method: "POST", cookie: identities[0], body: { ...verification, ...selection }, status: 400 });
+  }
+  equal((await api(`${path}/results`)).data.turnout, 0, "Malformed selection sets never record a ballot");
+  await api(`${path}/vote`, { method: "POST", cookie: identities[0], body: { ...verification, ballotVersion: "stale-version", optionIds: ["o1", "o2"] }, status: 409 });
+  const firstCast = await api(`${path}/vote`, { method: "POST", cookie: identities[0], body: { ...verification, optionIds: ["o2", "o1"] } });
+  check(firstCast.data.recorded && !firstCast.data.duplicate, "A multi-choice ballot records all selections together");
+  check((await api(`${path}/vote`, { method: "POST", cookie: identities[0], body: { ...verification, optionIds: ["o1", "o2"] } })).data.duplicate,
+    "Reversing the same selection set is an idempotent retry");
+  await api(`${path}/vote`, { method: "POST", cookie: identities[0], body: { ...verification, optionIds: ["o1", "o3"] }, status: 409 });
+  await api(`${path}/vote`, { method: "POST", cookie: identities[1], body: { ...verification, optionIds: ["o3", "o2"] } });
+  // Ordinary shard counts become visible after the shared one-second snapshot;
+  // retries here measure the expected aggregate without assuming cache timing.
+  let tally;
+  const deadline = Date.now() + 5000;
+  do {
+    tally = (await api(`${path}/results`)).data;
+    if (tally.turnout === 2) break;
+    await delay(100);
+  } while (Date.now() < deadline);
+  equal(tally.turnout, 2, "Two multi-choice submissions count as two ballots");
+  assert.deepEqual(tally.counts, { o1: 1, o2: 2, o3: 1 }); checks++;
+  equal(Object.values(tally.counts).reduce((sum, count) => sum + count, 0), 4, "Four selections do not inflate two-ballot turnout");
+  const hashes = identities.map(cookie => voterHash(event.id, cookie));
+  const indexes = [...new Set(hashes.map(hash => Number.parseInt(hash.slice(0, 2), 16) % 128))];
+  const stored = await inspect(event.id, indexes);
+  if (staff) {
+    equal(stored.coordinatorTurnout, null, "Staff event has no trial ballot counter");
+    equal(stored.shardTurnouts.reduce((sum, total) => sum + total, 0), 2, "Staff shards count ballots, not selected options");
+  } else {
+    equal(stored.coordinatorTurnout, 2, "Multi-choice trial stores two ballots in the coordinator");
+    check(stored.shardTurnouts.every(total => total === 0), "Multi-choice trial never writes ordinary vote shards");
+  }
+  await api(`/api/admin/events/${event.id}/export?shard=0`, { ...manager, status: 403 });
+  return { event, manager, path, hashes, indexes, cookies: identities, verification };
+}
+
+const multipleTrial = await exerciseMultiple(multipleEvent, { cookie: multiple.cookie });
+await delay(Math.max(0, Date.parse(staffEvent.opensAt) - Date.now() + 100));
+const multipleStaff = await exerciseMultiple(staffEdit, { owner: true }, true);
 console.log("Signup checks passed through live trial voting; waiting for its short local deadline…");
 await delay(Math.max(0, Date.parse(live.closesAt) - Date.now() + 100));
 const closed = (await api(`${route}/results`)).data;
@@ -226,5 +313,21 @@ const rows = pages.flatMap(({ data }) => data.rows);
 equal(rows.length, 2, "Closed trial export covers all128 compatible partitions");
 equal(new Set(rows.map(row => row.voter_hash)).size, 2, "Export has no duplicate ballot rows");
 check(rows.every(row => hashes.includes(row.voter_hash) && ["o1", "o2"].includes(row.option_id) && Number.isSafeInteger(row.created_at)), "Export shape and hashes match recorded trial ballots");
+check(rows.every(row => Array.isArray(row.option_ids) && row.option_ids.length === 1 && row.option_ids[0] === row.option_id), "Single-choice export adds a complete one-item selection array");
 check(pages.every(({ data }) => data.next === null), "Small export pages have no cursor");
-console.log(`Passed ${checks} disposable signup integration checks: quotas, retries/recovery, isolation, legacy/admin access, trial voting and export.`);
+for (const fixture of [multipleTrial, multipleStaff]) {
+  const result = (await api(`${fixture.path}/results`)).data;
+  equal(result.phase, "closed", "Multi-choice event reaches the shared scheduled close");
+  equal(result.turnout, 2, "Closed multi-choice result keeps ballot turnout");
+  assert.deepEqual(result.counts, { o1: 1, o2: 2, o3: 1 }); checks++;
+  await api(`${fixture.path}/vote`, { method: "POST", cookie: fixture.cookies[0], body: { ...fixture.verification, optionIds: ["o1", "o2"] }, status: 403 });
+  const partitions = await Promise.all(fixture.indexes.map(shard => api(`/api/admin/events/${fixture.event.id}/export?shard=${shard}`, fixture.manager)));
+  const exported = partitions.flatMap(({ data }) => data.rows);
+  equal(exported.length, 2, "Multi-choice export has exactly one row per ballot");
+  equal(new Set(exported.map(row => row.voter_hash)).size, 2, "Multi-choice raw rows have distinct voter hashes");
+  check(exported.every(row => fixture.hashes.includes(row.voter_hash) && row.option_id === "" && Number.isSafeInteger(row.created_at)), "Multi-choice raw rows leave the legacy single ID empty");
+  const byHash = new Map(exported.map(row => [row.voter_hash, row.option_ids]));
+  assert.deepEqual(byHash.get(fixture.hashes[0]), ["o1", "o2"]); checks++;
+  assert.deepEqual(byHash.get(fixture.hashes[1]), ["o2", "o3"]); checks++;
+}
+console.log(`Passed ${checks} disposable signup integration checks: quotas, retries/recovery, isolation, legacy/admin access, single/multiple voting and ballot exports.`);

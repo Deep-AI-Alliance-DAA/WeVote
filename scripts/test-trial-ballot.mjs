@@ -3,10 +3,11 @@
 // or burst-capacity test; HTTP/runtime behavior is covered by local API tests.
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initTrialBallot, recordTrialVote, readTrialResults, exportTrialVotes } from "../src/trial-ballot.js";
+import { Script } from "node:vm";
+import { initTrialBallot, recordTrialVote, readTrialResults, exportTrialVotes, normalizeOptionIds, storedOptionIds, exportVoteRow } from "../src/trial-ballot.js";
 
 const now = Date.now();
 const databases = [];
@@ -15,7 +16,7 @@ let checks = 0;
 function equal(actual, expected, label) { checks++; assert.deepEqual(actual, expected, label); }
 function check(condition, label) { checks++; assert.ok(condition, label); }
 
-function context(filename = ":memory:") {
+function context(filename = ":memory:", beforeInit) {
   const db = new DatabaseSync(filename);
   databases.push(db);
   const prepared = new Map();
@@ -25,7 +26,7 @@ function context(filename = ":memory:") {
       if (sql.fail?.(query)) throw new Error("Synthetic SQL write failure");
       let statement = prepared.get(query);
       if (!statement) { statement = db.prepare(query); prepared.set(query, statement); }
-      const reads = /^\s*(?:SELECT|EXPLAIN)\b/i.test(query);
+      const reads = /^\s*(?:SELECT|EXPLAIN|PRAGMA)\b/i.test(query);
       const rows = reads ? statement.all(...bindings).map(row => ({ ...row })) : [];
       const result = reads ? {} : statement.run(...bindings);
       return { toArray: () => rows, one: () => {
@@ -42,6 +43,7 @@ function context(filename = ":memory:") {
     },
     async sync() { storage.syncs++; if (storage.syncHook) await storage.syncHook(); },
   };
+  beforeInit?.(db);
   initTrialBallot(sql);
   return { storage, db };
 }
@@ -88,7 +90,7 @@ try {
     for (const row of page.rows) {
       check(!exported.has(row.voter_hash), "Export partitions do not overlap");
       equal(Number.parseInt(row.voter_hash.slice(0, 2), 16) % 128, index, "Each exported hash belongs to the requested partition");
-      equal(Object.keys(row).sort(), ["created_at", "option_id", "voter_hash"], "Export contains hashes only, without internal shard metadata");
+      equal(Object.keys(row).sort(), ["created_at", "option_id", "option_ids", "voter_hash"], "Export contains hashes and unambiguous selections, without internal shard metadata");
       exported.add(row.voter_hash);
     }
   }
@@ -119,6 +121,43 @@ try {
   const retries = await Promise.all(Array.from({ length: 20 }, () => recordTrialVote(small, limitOne, vote(0), now)));
   check(retries.every(result => result.status === 200 && result.body.duplicate), "Concurrent same-hash retries are idempotent at cap");
   equal(readTrialResults(small.storage.sql, limitOne).turnout, 1, "Retry promises do not add votes");
+
+  const multiple = context();
+  const multipleBallot = config({ maxChoices: 2, trial: { voteLimit: 2, maxDurationHours: 24 } });
+  const multiVote = { voterHash: hash(0), optionIds: ["o2", "o1"], ballotVersion: "current-version" };
+  equal((await recordTrialVote(multiple, multipleBallot, multiVote, now)).status, 200, "A two-choice ballot is accepted");
+  equal(readTrialResults(multiple.storage.sql, multipleBallot), { turnout: 1, counts: { o1: 1, o2: 1, o3: 0 } }, "Multiple selections consume one ballot and increment each option once");
+  equal((await recordTrialVote(multiple, multipleBallot, { ...multiVote, optionIds: ["o1", "o2"] }, now)).body.duplicate, true, "Selection order does not change duplicate identity");
+  equal((await recordTrialVote(multiple, multipleBallot, { ...multiVote, optionIds: ["o1", "o3"] }, now)).status, 409, "Changing a previously submitted set is rejected");
+  for (const optionIds of [[], ["o1", "o1"], ["o1", "o2", "o3"], ["o1", "missing"], "o1", null]) {
+    equal((await recordTrialVote(multiple, multipleBallot, { ...multiVote, voterHash: hash(1), optionIds, maxChoices: 20 }, now)).status, 400, "Empty, duplicate, excessive and invalid selections do not consume quota");
+  }
+  equal((await recordTrialVote(multiple, multipleBallot, { ...multiVote, optionId: "o1" }, now)).status, 400, "Mixed single and multiple request fields are rejected");
+  equal((await recordTrialVote(multiple, multipleBallot, vote(1, "o3"), now)).status, 200, "Legacy single input remains valid on a multiple-choice event");
+  equal((await recordTrialVote(multiple, multipleBallot, { ...multiVote, voterHash: hash(2) }, now)).body.code, "TRIAL_VOTE_LIMIT", "Two ballots reach the cap even though their option tally sums to three");
+  equal(readTrialResults(multiple.storage.sql, multipleBallot), { turnout: 2, counts: { o1: 1, o2: 1, o3: 1 } }, "Trial limit and turnout count ballots rather than selections");
+  const multiRows = exportTrialVotes(multiple.storage.sql, multipleBallot, { index: 0 }).rows;
+  equal(multiRows.length, 1, "A multi-choice ballot is exported once");
+  equal(multiRows[0].option_ids, ["o1", "o2"], "Export includes the complete canonical selection array");
+  equal(multiRows[0].option_id, "", "Multi-choice export does not pretend one option represents the whole ballot");
+  equal(exportTrialVotes(multiple.storage.sql, multipleBallot, { index: 1 }).rows[0].option_id, "o3", "Single-choice export preserves its legacy option_id");
+  equal((await recordTrialVote(multiple, multipleBallot, { ...multiVote, optionIds: ["o1", "o2"] }, now)).body.duplicate, true, "A multi-choice duplicate succeeds at the trial cap without changing counters");
+
+  const oldTrial = context(":memory:", db => {
+    db.exec("CREATE TABLE trial_votes (voter_hash TEXT PRIMARY KEY, shard INTEGER NOT NULL, option_id TEXT NOT NULL, created_at INTEGER NOT NULL); CREATE TABLE trial_counts (option_id TEXT PRIMARY KEY, total INTEGER NOT NULL); CREATE TABLE trial_totals (singleton INTEGER PRIMARY KEY, total INTEGER NOT NULL)");
+    db.prepare("INSERT INTO trial_votes VALUES (?, 0, 'o1', ?)").run(hash(0), now);
+    db.exec("INSERT INTO trial_counts VALUES ('o1', 1); INSERT INTO trial_totals VALUES (1, 1)");
+  });
+  equal(readTrialResults(oldTrial.storage.sql, ballot), { turnout: 1, counts: { o1: 1, o2: 0, o3: 0 } }, "A pre-migration single-choice trial retains its turnout and tally");
+  equal((await recordTrialVote(oldTrial, ballot, vote(0, "o1"), now)).body.duplicate, true, "Legacy rows still recognize idempotent single-choice retries");
+  equal(exportTrialVotes(oldTrial.storage.sql, ballot, { index: 0 }).rows[0].option_ids, ["o1"], "Legacy trial rows export their exact preserved choice as an array");
+  equal((await recordTrialVote(oldTrial, ballot, { voterHash: hash(1), optionIds: ["o1", "o2"], ballotVersion: "current-version" }, now)).status, 400, "Existing events default to one selection after migration");
+
+  const multiRollback = context();
+  multiRollback.storage.sql.fail = query => query.startsWith("INSERT INTO trial_counts") && multiRollback.storage.sql.exec("SELECT COUNT(*) AS total FROM trial_counts").one().total === 1;
+  equal((await recordTrialVote(multiRollback, multipleBallot, multiVote, now)).status, 503, "Failure during the second option tally does not report acceptance");
+  multiRollback.storage.sql.fail = null;
+  equal(readTrialResults(multiRollback.storage.sql, multipleBallot), { turnout: 0, counts: { o1: 0, o2: 0, o3: 0 } }, "All selections, the ledger and ballot quota roll back together");
 
   const rollback = context();
   rollback.storage.sql.fail = query => query.startsWith("INSERT INTO trial_counts");
@@ -163,6 +202,9 @@ try {
     config({ options: [{ id: "o1" }, { id: "o1" }] }), config({ lifecycle: "unknown" })]) {
     equal((await recordTrialVote(invalid, bad, vote(0), now)).status, 503, "Malformed authoritative configuration cannot accept votes");
   }
+  for (const maxChoices of [null, 0, 4, 1.5, "2", Infinity]) {
+    equal((await recordTrialVote(invalid, config({ maxChoices }), vote(0), now)).status, 503, "Malformed authoritative selection limits fail closed");
+  }
   for (const boundary of [config({ lifecycle: "draft" }), config({ opensAt: new Date(now + 1).toISOString() }), config({ closesAt: new Date(now).toISOString() })]) {
     equal((await recordTrialVote(invalid, boundary, vote(0), now)).status, 403, "Draft, pending and exact closing boundary reject votes");
   }
@@ -173,7 +215,77 @@ try {
     equal((await recordTrialVote(invalid, ballot, data, now)).status, 400, "Malformed bounded input is rejected");
   }
   equal(readTrialResults(invalid.storage.sql, ballot).turnout, 1, "Rejected configuration/input/boundaries do not write votes");
-  console.log(`Passed ${checks} real-SQLite trial ballot checks: exact 10,000 cap, idempotency, rollback/durability, timing, bounded inputs and complete partitioned exports.`);
+
+  // Exercise staff shard migrations and pinned selection limits with the same
+  // real SQLite adapter. HTTP routing remains covered by the runtime suites.
+  const source = await readFile(new URL("../src/worker.js", import.meta.url), "utf8");
+  const executable = source
+    .replace(/^import \{ DurableObject \} from "cloudflare:workers";$/m, "class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }")
+    .replace(/^import .* from "\.\/(?:organizer-auth|trial-ballot)\.js";$/gm, "")
+    .replace(/^export \{ AdminDirectory \} from "\.\/admin-directory\.js";$/m, "")
+    .replace(/^export default /m, "const worker = ")
+    .replace(/^export class /gm, "class ");
+  const VoteShard = new Script(`${executable}\n;VoteShard;`, { filename: "src/worker.js" }).runInNewContext({
+    TextEncoder, URL, Response, Date, normalizeOptionIds, storedOptionIds, exportVoteRow,
+  });
+  const eventId = "0123456789abcdef01234567";
+  let authoritative = { ...config({ maxChoices: 2 }), id: eventId };
+  let reads = 0;
+  const shardEnvironment = { EVENT_COORDINATOR: { getByName: id => {
+    equal(id, eventId, "Shard loads only its event's authoritative ballot");
+    return { getConfig: async () => { reads++; return authoritative; } };
+  } } };
+  const staffContext = context();
+  const staff = new VoteShard(staffContext, shardEnvironment);
+  const staffVote = async (data, target = staff) => {
+    const response = await target.fetch(new Request("https://shard.internal/vote", { method: "POST", body: JSON.stringify({ eventId, createdAt: now, closesAt: now + 3_600_000, ...data }) }));
+    return { status: response.status, body: await response.json() };
+  };
+  equal((await staffVote(multiVote)).status, 200, "Staff shard accepts multiple choices under its authoritative limit");
+  equal(await (await staff.fetch(new Request("https://shard.internal/count"))).json(), { turnout: 1, counts: { o1: 1, o2: 1 } }, "Staff turnout counts ballots once with separate option tallies");
+  equal((await staffVote({ ...multiVote, optionIds: ["o1", "o2"] })).body.duplicate, true, "Staff shard duplicates compare unordered sets");
+  equal((await staffVote({ ...multiVote, optionIds: ["o2", "o3"] })).status, 409, "Staff shard rejects a changed selection set");
+  authoritative = { ...authoritative, maxChoices: 3 };
+  equal((await staffVote({ ...multiVote, voterHash: hash(2), optionIds: ["o1", "o2", "o3"], maxChoices: 3 })).status, 400, "Once opened, the pinned shard ignores attempted limit expansion");
+  equal((await staffVote({ ...multiVote, voterHash: hash(2), ballotVersion: "old" })).status, 409, "Staff ballot version remains authoritative");
+  equal(reads, 1, "Opened shard uses its persisted authoritative selection limit");
+  equal((await staffVote(vote(1, "o3"))).status, 200, "Staff multiple-choice ballots still support old optionId requests");
+  const staffExport = await (await staff.fetch(new Request("https://shard.internal/export"))).json();
+  equal(staffExport.rows.length, 2, "Staff export includes each submitted ballot once");
+  equal(staffExport.rows[0].option_ids, ["o1", "o2"], "Staff export includes every selected option");
+  equal(staffExport.rows[1].option_id, "o3", "Staff export retains single-choice option_id compatibility");
+  new VoteShard(staffContext, shardEnvironment);
+  equal(await (await staff.fetch(new Request("https://shard.internal/count"))).json(), { turnout: 2, counts: { o1: 1, o2: 1, o3: 1 } }, "Repeated shard schema initialization preserves turnout and all option tallies");
+
+  const legacyStaffContext = context(":memory:", db => {
+    db.exec("CREATE TABLE votes (voter_hash TEXT PRIMARY KEY, option_id TEXT NOT NULL, created_at INTEGER NOT NULL); CREATE TABLE counts (option_id TEXT PRIMARY KEY, total INTEGER NOT NULL); CREATE TABLE ballot (singleton INTEGER PRIMARY KEY, version TEXT NOT NULL, options_json TEXT NOT NULL)");
+    db.prepare("INSERT INTO votes VALUES (?, 'o1', ?)").run(hash(0), now);
+    db.exec("INSERT INTO counts VALUES ('o1', 1); INSERT INTO ballot VALUES (1, 'current-version', '[\"o1\",\"o2\",\"o3\"]')");
+  });
+  const oldStaff = new VoteShard(legacyStaffContext, shardEnvironment);
+  equal(await (await oldStaff.fetch(new Request("https://shard.internal/count"))).json(), { turnout: 1, counts: { o1: 1 } }, "Existing shard turnout migrates from the preserved ballot ledger");
+  equal((await staffVote(vote(0, "o1"), oldStaff)).body.duplicate, true, "Existing shard rows retain single-choice idempotency");
+  equal((await staffVote({ ...multiVote, voterHash: hash(1) }, oldStaff)).status, 400, "An already pinned legacy ballot stays single-choice after migration");
+  equal((await (await oldStaff.fetch(new Request("https://shard.internal/export"))).json()).rows[0].option_ids, ["o1"], "Legacy shard export contains its exact original choice");
+  equal(legacyStaffContext.storage.sql.exec("SELECT max_choices FROM ballot WHERE singleton = 1").one().max_choices, 1, "Legacy ballot migration defaults to a one-choice cap");
+
+  const staffRollbackContext = context();
+  const staffRollback = new VoteShard(staffRollbackContext, shardEnvironment);
+  authoritative = { ...authoritative, maxChoices: 2 };
+  staffRollbackContext.storage.sql.fail = query => query.startsWith("INSERT INTO counts") && staffRollbackContext.storage.sql.exec("SELECT COUNT(*) AS total FROM counts").one().total === 1;
+  checks++; await assert.rejects(staffVote(multiVote, staffRollback), /Synthetic SQL write failure/, "A staff tally failure never reports successful acceptance");
+  staffRollbackContext.storage.sql.fail = null;
+  equal(await (await staffRollback.fetch(new Request("https://shard.internal/count"))).json(), { turnout: 0, counts: {} }, "Staff ledger and every selection counter roll back atomically");
+  equal(staffRollbackContext.storage.sql.exec("SELECT COUNT(*) AS total FROM votes").one().total, 0, "Staff partial tally failure leaves no submitted ballot");
+  equal((await staffVote(multiVote, staffRollback)).status, 200, "Staff retry after rollback records the complete set once");
+
+  const legacyTicketContext = context();
+  const legacyTicket = new VoteShard(legacyTicketContext, {});
+  const ticketVote = data => legacyTicket.fetch(new Request("https://shard.internal/vote", { method: "POST", body: JSON.stringify({ ...data, createdAt: now, closesAt: now + 3_600_000 }) }));
+  equal((await ticketVote(vote(0, "o1"))).status, 200, "The original non-event ticket API still records single optionId votes");
+  equal((await ticketVote({ voterHash: hash(1), optionIds: ["o1", "o2"] })).status, 400, "The original non-event ticket poll remains single-choice");
+
+  console.log(`Passed ${checks} real-SQLite ballot checks: exact 10,000 cap, multi-choice turnout/idempotency/rollback, staff and trial migrations, durability, pinned limits and complete partitioned exports.`);
 } finally {
   for (const db of databases) db.close();
   await rm(workspace, { recursive: true, force: true });
