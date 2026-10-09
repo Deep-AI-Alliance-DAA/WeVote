@@ -10,7 +10,7 @@ A useful private report includes the affected commit/version, a synthetic reprod
 
 ## Project status
 
-WeVote is an early project preparing for public release. The latest default-branch version is the development baseline; there is no promise of security backports for older versions. Hosts are responsible for tracking fixes and verifying their own deployment.
+WeVote is an early open-source project. The latest default-branch version is the development baseline; there is no promise of security backports for older versions. Hosts are responsible for tracking fixes and verifying their own deployment.
 
 ## Relevant boundaries
 

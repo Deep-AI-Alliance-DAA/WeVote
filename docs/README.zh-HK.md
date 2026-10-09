@@ -6,7 +6,15 @@
 
 **現有服務：[vote.daa.hk](https://vote.daa.hk/)**，寄存喺 Cloudflare Pages 同私有 API Worker。
 
-呢份係香港廣東話使用指南。[English README](../README.md) · [部署到自己 Cloudflare 帳戶](DEPLOYMENT.md)。源碼採用 MIT 授權；GitHub repo 目前係私人，由擁有人管理存取權限。
+**公開源碼：[Deep-AI-Alliance-DAA/WeVote](https://github.com/Deep-AI-Alliance-DAA/WeVote)。**
+
+呢份係香港廣東話使用指南。[English README](../README.md) · [部署到自己 Cloudflare 帳戶](DEPLOYMENT.md)。源碼採用 [MIT 授權](../LICENSE)。
+
+## 靈感：「Keith $5 理論」
+
+「Keith $5 理論」係今次項目嘅技術靈感：共用快取、按需要更新，減少每個用家都重複做同一輪後端工作。Keith Li 嘅 [HK Traffic Intelligence](https://github.com/keithligh/hk-traffic-intelligence) README 亦講解咗多個用家共用同一份資料副本嘅做法。
+
+[Cloudflare Workers Paid](https://developers.cloudflare.com/workers/platform/pricing/) 由 US$5 月費起；WeVote 實際總費用要計請求、CPU、Durable Objects、KV 等用量，詳情睇下面「成本同規模」。
 
 ## 功能同頁面
 
@@ -62,6 +70,8 @@ Pages Function 快取公開結果，EventCoordinator 共用一次分區彙總，
 需要 Node.js 22+。
 
 ```bash
+git clone https://github.com/Deep-AI-Alliance-DAA/WeVote.git
+cd WeVote
 npm ci
 npm run setup:dev
 npm run dev

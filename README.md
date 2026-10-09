@@ -6,9 +6,17 @@ Create an event, share one voting link or QR code, and display the results. WeVo
 
 **Hosted installation:** [vote.daa.hk](https://vote.daa.hk/), running on Cloudflare Pages and a private API Worker.
 
+**Public source:** [Deep-AI-Alliance-DAA/WeVote](https://github.com/Deep-AI-Alliance-DAA/WeVote).
+
 [香港廣東話指南](docs/README.zh-HK.md) · [Deployment](docs/DEPLOYMENT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-The source is licensed under [MIT](LICENSE). This GitHub repository is currently private; access is managed by its owner.
+The source is licensed under [MIT](LICENSE).
+
+## Inspiration: “Keith Li's US$5 theory”
+
+WeVote takes inspiration from Keith Li's emphasis on shared caching and reducing repeated work. His [HK Traffic Intelligence](https://github.com/keithligh/hk-traffic-intelligence) describes serving many viewers from a shared feed copy and refreshing it when due.
+
+[Cloudflare Workers Paid](https://developers.cloudflare.com/workers/platform/pricing/) starts at US$5 per month. WeVote's actual total bill depends on requests, CPU, Durable Objects, KV, and other usage; the cost and capacity limits are explained below.
 
 ## Features
 
@@ -41,6 +49,8 @@ An optional legacy signed-ticket mode counts each valid ticket once. Organizers 
 Requirements: Node.js 22 or newer and npm.
 
 ```bash
+git clone https://github.com/Deep-AI-Alliance-DAA/WeVote.git
+cd WeVote
 npm ci
 npm run setup:dev
 npm run dev

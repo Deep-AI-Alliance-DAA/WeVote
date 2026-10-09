@@ -1,5 +1,7 @@
 # Open-source release
 
+The public source repository is [Deep-AI-Alliance-DAA/WeVote](https://github.com/Deep-AI-Alliance-DAA/WeVote), licensed under [MIT](../LICENSE). Deployment-specific posters and organizer logos have separate rights and are not covered by the source license.
+
 The release source ZIP is a snapshot of the reviewed, committed source tree. It does not contain Git history or change the visibility of any repository.
 
 ## Prepare the snapshot
@@ -13,9 +15,9 @@ The release source ZIP is a snapshot of the reviewed, committed source tree. It 
 
 `git archive` excludes untracked and ignored files, but it includes tracked files. It does not automatically remove sensitive content that someone has committed. Repeat the source review when preparing later releases.
 
-## Publish a fresh repository
+## Publish a source snapshot in a separate repository
 
-The preferred publication route is to create a new repository from the reviewed ZIP:
+If you need a separate repository containing only a reviewed source snapshot, create it from the ZIP:
 
 1. Extract the ZIP into a new directory outside the production checkout.
 2. Initialize a new Git repository there and create its initial source commit.
@@ -23,10 +25,10 @@ The preferred publication route is to create a new repository from the reviewed 
 
 Do not copy the original `.git` directory into the new repository. Keep the production checkout, its local credentials, and its deployed configuration separate from the release source.
 
-## Existing private history
+## Deployment-specific assets in Git history
 
-The existing private repository history contains a competition poster that is excluded from this release snapshot. Removing the file from the latest commit or adding an ignore rule leaves earlier versions in Git history.
+The public repository's earlier commits contain a competition poster that is excluded from the current source snapshot. Removing the file from the latest commit or adding an ignore rule leaves earlier versions in Git history. The poster and its logos retain their respective rights; their presence in an earlier commit does not make them MIT-licensed project artwork.
 
-A clean source ZIP is therefore not evidence that the existing repository is ready for a public visibility change. Before publishing that history, obtain permission that covers redistribution of the retained asset, or perform an explicitly approved history cleanup and audit the resulting history. Publishing a fresh repository from the clean ZIP avoids carrying those historical files into the public release.
+A source ZIP does not contain those historical files. Review the rights to any historical assets before redistributing them. A separate repository initialized from the reviewed ZIP starts with that snapshot only.
 
 The release command packages local source only. It does not deploy the application, upload the ZIP, rewrite history, or make a repository public.

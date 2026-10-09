@@ -2,7 +2,7 @@
 
 Thanks for helping make WeVote easier to deploy, use, and maintain. Read the [README](README.md), [Code of Conduct](CODE_OF_CONDUCT.md), and [security policy](SECURITY.md) before contributing.
 
-The repository is being prepared for public release. Access and publication are controlled by its owner; these instructions do not change its visibility.
+WeVote is open source under the [MIT License](LICENSE). Contributions are welcome through issues and pull requests in [Deep-AI-Alliance-DAA/WeVote](https://github.com/Deep-AI-Alliance-DAA/WeVote).
 
 ## Discuss the change
 
