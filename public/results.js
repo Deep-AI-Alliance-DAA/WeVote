@@ -43,13 +43,15 @@ function renderReport(data) {
   const hasCounts = hasReportCounts(data);
   const turnout = reportCount(data.turnout);
   const phase = reportLabels[data.phase] || "讀取活動資料中";
-  document.title = `${data.name} · ${data.phase === "draft" ? "草稿預覽" : closed ? "最終結果" : "即時結果（未截止）"} · WeVote`;
+  const pending = data.phase === "pending";
+  const pendingCopy = `投票將於 ${formatReportTime(data.opensAt)}（香港時間）開始。${data.resultsVisibility === "live" ? "開始投票後會即時公開各選項票數及百分比。" : "各選項票數及百分比會於截止後公開。"}`;
+  document.title = `${data.name} · ${data.phase === "draft" ? "草稿預覽" : pending ? "等待投票開始" : closed ? "最終結果" : "即時結果（未截止）"} · WeVote`;
   reportElements["event-title"].textContent = data.name;
   reportElements["event-question"].textContent = data.question;
   applyEventPresentation(reportElements["event-presentation"], data.presentation, data.name);
   reportElements["report-phase"].textContent = phase;
   reportElements["report-turnout"].textContent = turnout.toLocaleString("zh-HK");
-  reportElements["report-visibility"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。以下內容只供預覽。" : closed
+  reportElements["report-visibility"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。以下內容只供預覽。" : pending ? pendingCopy : closed
     ? turnout === 0 ? "活動已截止，未有已記錄投票。" : "投票已截止，以下顯示各選項嘅已記錄票數。"
     : `${turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票。"}開啟連結或掃碼唔會計票。票數約每 10 秒更新${hasCounts ? "。" : "，各選項結果會於截止後公開。"}`;
   reportElements["report-opens"].textContent = formatReportTime(data.opensAt);
@@ -62,8 +64,8 @@ function renderReport(data) {
   reportElements["csv-button"].disabled = !canExport;
   reportElements["print-button"].disabled = !canExport;
   reportElements["export-note"].textContent = data.phase === "draft" ? "草稿未發佈，暫時未有投票報告。" : canExport ? closed ? "下載完整票數摘要，或使用瀏覽器列印功能另存 PDF。" : "可保存目前票數摘要。活動仍在進行，報告會標示「未截止」及資料更新時間。" : "各選項結果公開後可下載 CSV，或列印及另存 PDF。";
-  reportElements["waiting-title"].textContent = data.phase === "draft" ? "草稿預覽" : data.phase === "closed" ? "結果整理中" : "投票截止後公布結果";
-  reportElements["waiting-copy"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。主辦方發佈後先會按設定開放投票同顯示結果。" : data.phase === "closed" ? "活動已截止，正在讀取最終結果。請稍候。" : "活動進行期間只顯示參與人數。各選項票數及百分比會喺截止後公開。";
+  reportElements["waiting-title"].textContent = data.phase === "draft" ? "草稿預覽" : pending ? "等待投票開始" : data.phase === "closed" ? "結果整理中" : "投票截止後公布結果";
+  reportElements["waiting-copy"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。主辦方發佈後先會按設定開放投票同顯示結果。" : pending ? pendingCopy : data.phase === "closed" ? "活動已截止，正在讀取最終結果。請稍候。" : "活動進行期間只顯示參與人數。各選項票數及百分比會喺截止後公開。";
 
   if (hasCounts) {
     reportElements["results-title"].textContent = closed ? "最終投票分佈" : "即時結果（未截止）";
