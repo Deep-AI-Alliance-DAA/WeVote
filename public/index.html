@@ -6,10 +6,10 @@
     <meta name="referrer" content="no-referrer">
     <meta name="theme-color" content="#f6f7f5">
     <title>WeVote — 讓每個選擇被睇見</title>
-    <meta name="description" content="建立投票活動、分享連結或 QR code，讓大家一起選擇。WeVote 即時投票。">
+    <meta name="description" content="免費試用 WeVote，即時投票、活動連結及 QR code、結果圖表與報告匯出。按需要加購活動額度，亦可下載開源程式自行部署。">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/home.css">
-    <script src="/home.js" defer></script>
+    <script type="module" src="/home.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#join">跳至加入投票</a>
@@ -19,7 +19,7 @@
           <span class="home-brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="m7 20 8 9L33 10" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 30c9 6 22 7 32-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
           <span>WeVote<span class="brand-sub">讓選擇成為共識</span></span>
         </a>
-        <nav aria-label="主選單"><a class="nav-how" href="#how">點樣用</a><a class="nav-admin" href="/admin.html">管理活動 <span aria-hidden="true">↗</span></a></nav>
+        <nav aria-label="主選單"><a class="nav-how" href="#plans">試用及方案</a><a class="nav-admin" href="/admin.html">管理活動 <span aria-hidden="true">↗</span></a></nav>
       </header>
       <main>
         <section class="home-hero" aria-labelledby="home-title">
@@ -41,6 +41,23 @@
           <div><span class="section-marker">主辦方入口</span><h2 id="organizer-title">開一場活動，先免費試用。</h2><p id="home-trial">每個帳戶可建立一個活動，最多 10,000 張有效投票，投票期間最長 24 小時。儲存草稿亦會使用呢個配額。</p></div>
           <div class="organizer-signin"><div id="home-auth-providers" class="organizer-actions" hidden><a id="home-google-login" class="button button-quiet" href="/api/auth/google/start" hidden>用 Google 登入 <span aria-hidden="true">↗</span></a><a id="home-apple-login" class="button button-quiet" href="/api/auth/apple/start" hidden>用 Apple 登入 <span aria-hidden="true">↗</span></a></div><p id="home-auth-message" class="organizer-status" role="status" aria-live="polite">正在確認主辦方登入方式…</p><a class="organizer-admin" href="/admin.html">已有帳戶／管理員密鑰登入 <span aria-hidden="true">→</span></a></div>
         </section>
+        <section class="plans-section" id="plans" aria-labelledby="plans-title">
+          <div class="section-title"><div><span class="section-marker">試用及方案</span><h2 id="plans-title">由一場開始，按需要加購。</h2></div><p>每場都有專屬連結、QR code 同結果報告。</p></div>
+          <div class="plans-grid">
+            <article class="plan-card">
+              <span class="plan-label">免費試用</span><h3>開第一場活動</h3><p class="plan-price">免費<span>每個註冊帳戶一次</span></p>
+              <ul><li>1 個活動</li><li>最多 10,000 張有效票</li><li>投票期最多 24 小時</li><li>自訂投票頁、單選或多選</li></ul>
+              <a class="button button-primary" href="#organize">登入，免費試用 <span aria-hidden="true">↗</span></a>
+            </article>
+            <article class="plan-card plan-paid" id="home-paid-plan" hidden>
+              <span class="plan-label">額外活動</span><h3>為下一場準備</h3><p class="plan-price"><span id="home-paid-price"></span><span>／活動 · 一次付款</span></p>
+              <ul><li>1 個活動額度</li><li id="home-paid-votes"></li><li id="home-paid-duration"></li><li>經 Stripe 安全結帳</li></ul>
+              <a class="button button-quiet" href="/admin.html">登入後購買 <span aria-hidden="true">↗</span></a>
+            </article>
+          </div>
+          <p class="plan-note">儲存草稿亦會使用 1 個活動額度。投票期指活動設定嘅開始至截止時間。<a href="/service.html">查看服務及私隱說明 <span aria-hidden="true">→</span></a></p>
+          <p class="plan-status" id="home-plan-message" role="status" aria-live="polite">正在確認額外活動方案…</p>
+        </section>
         <section class="join-panel" id="join" aria-labelledby="join-title">
           <div class="join-heading"><span class="section-marker">參與投票</span><h2 id="join-title">有活動連結？由呢度開始。</h2><p>貼上主辦方提供嘅連結，或者輸入活動編號。</p></div>
           <form id="join-form" class="join-form">
@@ -59,7 +76,7 @@
         </section>
         <section class="participation-note" aria-labelledby="participation-title"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 3 27 8v9c-1 6-5 10-11 13C10 27 6 23 5 17V8L16 3Z"/><path d="m11 16 4 4 7-8"/></svg><div><h2 id="participation-title">公開參與，清楚交代。</h2><p>公開投票以瀏覽器識別配合安全驗證減少重複投票；清除資料或轉用其他裝置仍可能再次投票。適合活動互動同意見收集。</p></div></section>
       </main>
-      <footer class="home-footer"><a class="footer-brand" href="/">WeVote</a><p>Credits: <a href="https://daa.hk/">DAA.HK</a>, Hillman Tam and Keith Li</p><a class="footer-service" href="/service.html">服務及私隱說明</a><a class="footer-admin" href="/admin.html">管理員入口 <span aria-hidden="true">↗</span></a></footer>
+      <footer class="home-footer"><a class="footer-brand" href="/">WeVote</a><p>Credits: <a href="https://daa.hk/">DAA.HK</a>, Hillman Tam and Keith Li</p><a href="https://github.com/Deep-AI-Alliance-DAA/WeVote">GitHub 開源</a><a class="footer-service" href="/service.html">服務及私隱說明</a><a class="footer-admin" href="/admin.html">管理員入口 <span aria-hidden="true">↗</span></a></footer>
     </div>
   </body>
 </html>

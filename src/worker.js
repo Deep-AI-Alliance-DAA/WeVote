@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { oauthAvailability, startOrganizerOAuth, finishOrganizerOAuth } from "./organizer-auth.js";
 import { initTrialBallot, recordTrialVote, readTrialResults, exportTrialVotes, normalizeOptionIds, storedOptionIds, exportVoteRow } from "./trial-ballot.js";
-import { BillingError, billingOverview, createBillingCheckout, reconcileBillingCheckout, handleBillingWebhook } from "./billing.js";
+import { BillingError, billingOverview, publicBillingOffer, createBillingCheckout, reconcileBillingCheckout, handleBillingWebhook } from "./billing.js";
 export { AdminDirectory } from "./admin-directory.js";
 
 const SHARDS = 128;
@@ -737,7 +737,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (url.pathname === "/api/auth/providers") return request.method === "GET" ? json({ ...oauthAvailability(env), trial: TRIAL }) : json({ error: "方法無效。" }, 405);
+      if (url.pathname === "/api/auth/providers") return request.method === "GET" ? json({ ...oauthAvailability(env), trial: TRIAL, billing: publicBillingOffer(env) }) : json({ error: "方法無效。" }, 405);
       const socialAuth = /^\/api\/auth\/(google|apple)\/(start|callback)$/.exec(url.pathname);
       if (socialAuth) return await organizerAuth(request, env, socialAuth[1], socialAuth[2]);
       if (url.pathname.startsWith("/api/admin/")) checkAdminOrigin(request);

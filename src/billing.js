@@ -99,12 +99,23 @@ function checkoutView(order) {
     status: order.status, expiresAt: order.expires_at, livemode: Boolean(order.livemode) } : null;
 }
 
+function offerView(config) {
+  return config ? { currency: config.currency, amountMinor: config.amountMinor,
+    credits: 1, voteLimit: 10000, maxDurationHours: 168, livemode: config.livemode } : null;
+}
+
+// Public pricing uses only a complete live configuration. Test mode, private
+// Stripe identifiers, account balances and purchase state stay off this route.
+export function publicBillingOffer(env) {
+  const config = billingConfiguration(env);
+  return config?.livemode ? { enabled: true, offer: offerView(config) } : { enabled: false, offer: null };
+}
+
 export async function billingOverview(env, directory, principal) {
   const config = billingConfiguration(env);
   const eligible = billingEligible(principal, env);
   const summary = await directory.getBillingSummary(principal.id);
-  return { enabled: Boolean(config), eligible, offer: config ? { currency: config.currency, amountMinor: config.amountMinor,
-    credits: 1, voteLimit: 10000, maxDurationHours: 168, livemode: config.livemode } : null,
+  return { enabled: Boolean(config), eligible, offer: offerView(config),
     paidCredits: summary?.paidCredits || 0, latestCheckout: config ? checkoutView(summary?.latestCheckout) : null, principal,
     creationQuota: await directory.getCreationQuota(principal.id) };
 }

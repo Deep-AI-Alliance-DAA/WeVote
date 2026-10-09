@@ -17,6 +17,13 @@ configuration, not a price hardcoded into the open-source application. This is
 a one-time purchase, not a subscription. Describing this offer does not confirm
 that a particular deployment has enabled live payments.
 
+The homepage obtains the configured offer from the public
+`GET /api/auth/providers` response. Its `billing` object advertises only a
+complete live configuration; test, missing or incomplete configuration returns
+`enabled: false` and `offer: null`. The public response contains only the price,
+currency and event limits, never credentials, Stripe identifiers, account
+balances or checkout state. Reading this offer does not contact Stripe.
+
 ## Configuration
 
 Add these fields privately to the ignored `.env.production.json`. Never commit

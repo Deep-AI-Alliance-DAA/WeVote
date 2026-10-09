@@ -8,8 +8,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
-import { billingConfiguration, billingEligible, billingOverview, createBillingCheckout,
+import { billingConfiguration, billingEligible, billingOverview, publicBillingOffer, createBillingCheckout,
   reconcileBillingCheckout, handleBillingWebhook, verifyStripeWebhook, STRIPE_API_VERSION } from "../src/billing.js";
+import { oauthAvailability } from "../src/organizer-auth.js";
 import { initTrialBallot, recordTrialVote, readTrialResults } from "../src/trial-ballot.js";
 import { testBillingRuntime } from "./test-billing-runtime.mjs";
 
@@ -199,6 +200,39 @@ try {
     equal(billingConfiguration({ ...testEnv, ...change }), null, "Unsafe configuration cannot enable checkout");
   }
   equal(billingConfiguration({ ...liveEnv, STRIPE_TEST_ORGANIZER_IDS: accountA }), null, "Live configuration requires removing stale test allowlist");
+  const expectedPublicOffer = { enabled: true, offer: { currency: "hkd", amountMinor: 12345,
+    credits: 1, voteLimit: 10000, maxDurationHours: 168, livemode: true } };
+  equal(publicBillingOffer(liveEnv), expectedPublicOffer, "Only a complete live configuration advertises the public paid offer");
+  for (const env of [{}, testEnv, { ...liveEnv, STRIPE_WEBHOOK_SECRET: "" }, { ...liveEnv, STRIPE_PRICE_AMOUNT: "0" }]) {
+    equal(publicBillingOffer(env), { enabled: false, offer: null }, "Missing, test, incomplete and invalid configurations do not advertise public purchases");
+  }
+  const publicJson = JSON.stringify(publicBillingOffer(liveEnv));
+  for (const privateValue of [liveEnv.STRIPE_SECRET_KEY, liveEnv.STRIPE_WEBHOOK_SECRET, liveEnv.STRIPE_PRICE_ID, accountA]) {
+    check(!publicJson.includes(privateValue), "Public pricing never contains credentials, Stripe IDs or account identifiers");
+  }
+  const overview = await billingOverview(liveEnv, { getBillingSummary: async () => ({ paidCredits: 0, latestCheckout: null }),
+    getCreationQuota: async () => ({ limit: 1, used: 0 }) }, principal);
+  equal(overview.offer, expectedPublicOffer.offer, "Public and authenticated billing use the same authoritative offer construction");
+
+  const publicWorkerSource = (await readFile(new URL("../src/worker.js", import.meta.url), "utf8"))
+    .replace(/^import .*;$/gm, "")
+    .replace(/^export \{ AdminDirectory \} from "\.\/admin-directory\.js";$/m, "")
+    .replace(/^export default /m, "globalThis.PublicBillingWorker = ")
+    .replace(/^export class /gm, "class ");
+  check(!/^\s*(?:import|export)\b/m.test(publicWorkerSource), "Public route fixture transforms only the current Worker module");
+  const publicSandbox = { DurableObject: class {}, TextEncoder, URL, Response, oauthAvailability, publicBillingOffer,
+    fetch() { throw new Error("Public pricing must not request Stripe or any network service"); } };
+  vm.runInNewContext(publicWorkerSource, publicSandbox, { filename: "worker-public-billing-test.js" });
+  const beforePublicCalls = outbound.length;
+  for (const env of [liveEnv, testEnv, { ...liveEnv, STRIPE_WEBHOOK_SECRET: "" }, {}]) {
+    const environment = { ...env, ADMIN_DIRECTORY: { getByName() { throw new Error("Public pricing must not access account storage"); } },
+      EVENTS: { get() { throw new Error("Public pricing must not access event storage"); }, put() { throw new Error("Public pricing must not write state"); } } };
+    const response = await publicSandbox.PublicBillingWorker.fetch(new Request("https://billing-fixture.invalid/api/auth/providers"), environment);
+    equal(response.status, 200, "Public provider and pricing availability requires no login");
+    equal(response.headers.get("Cache-Control"), "no-store", "Public offer availability follows the existing provider cache policy");
+    equal(await response.json(), { ...oauthAvailability(env), trial: { eventLimit: 1, voteLimit: 10000, maxDurationHours: 24 }, billing: publicBillingOffer(env) }, "Provider route preserves existing fields and returns only safe pricing fields");
+  }
+  equal(outbound.length, beforePublicCalls, "Public pricing does not issue per-request Stripe API calls");
   check(billingEligible(principal, testEnv), "Allowlisted organizer may test checkout");
   check(!billingEligible({ ...principal, id: accountC }, testEnv), "Public organizer cannot buy using test card mode");
   for (const changed of [{ disabled: true }, { role: "admin" }, { role: "owner" }, { selfRegistered: false }]) check(!billingEligible({ ...principal, ...changed }, testEnv), "Only enabled self-registered organizers buy credits");
