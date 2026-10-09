@@ -1,0 +1,32 @@
+.event-share { padding-top: 18px; border-top: 1px solid #dbe5e7; }
+.event-share-overview { display: flex; gap: 18px; align-items: start; }
+.event-share-qr { margin: 0; padding: 7px 7px 9px; border: 1px solid #d7e1e4; border-radius: 8px; background: #fff; flex: 0 0 136px; }
+.event-share-qr canvas { display: block; width: 120px; height: 120px; image-rendering: pixelated; }
+.event-share-qr figcaption { text-align: center; color: #667d89; font-size: 10px; line-height: 1.4; margin-top: 5px; }
+.event-share-info { flex: 1; min-width: 0; }
+.event-share-title { margin: 0 0 9px; font-size: 13px; color: #274758; }
+.event-share-url { display: block; width: 100%; padding: 9px; border: 1px solid #cbd9de; border-radius: 6px; background: #f3f7f7; color: #285e78; font-size: 11px; line-height: 1.5; text-overflow: ellipsis; }
+.event-share-url:focus-visible { outline: 3px solid #bd8e78; outline-offset: 2px; }
+.event-share-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+.event-share-button { display: inline-flex; justify-content: center; align-items: center; min-height: 35px; padding: 7px 11px; border: 1px solid #bfcfd5; background: #fff; border-radius: 6px; color: #2a5267; font-size: 11px; font-weight: 600; line-height: 1.4; text-decoration: none; cursor: pointer; }
+.event-share-button:hover { border-color: #85a8b6; background: #edf5f8; }
+.event-share-button.is-primary { border-color: #214760; background: #214760; color: #fff; }
+.event-share-button.is-primary:hover { background: #31647e; }
+.event-share-button:disabled { opacity: .5; cursor: progress; }
+.event-share-downloads { margin-top: 16px; }
+.event-share-instagram, .event-share-status { color: #758792; font-size: 11px; line-height: 1.75; margin: 10px 0 0; }
+.event-share-status:empty { display: none; }
+.event-share-status { padding: 9px 11px; border-radius: 6px; color: #336657; background: #edf5f1; }
+.event-share-status.is-error { color: #963f35; background: #fff2ee; }
+@media (max-width: 610px) {
+  .event-share-overview { gap: 13px; }
+  .event-share-qr { flex-basis: 106px; }
+  .event-share-qr canvas { width: 90px; height: 90px; }
+  .event-share-button { min-height: 38px; }
+  .event-share-social { gap: 6px; }
+}
+@media (max-width: 390px) {
+  .event-share-overview { flex-wrap: wrap; }
+  .event-share-info { flex-basis: 100%; }
+}
+@media print { .event-share { display: none !important; } }

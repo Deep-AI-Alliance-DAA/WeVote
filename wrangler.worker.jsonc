@@ -3,6 +3,10 @@
   "workers_dev": false,
   "main": "src/worker.js",
   "compatibility_date": "2026-10-09",
+  "vars": { "PUBLIC_BASE_URL": "https://vote.daa.hk" },
+  "kv_namespaces": [
+    { "binding": "EVENTS", "id": "12ebc9b1f2524f73a894d068994c4361" }
+  ],
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 0.01 },
@@ -15,10 +19,12 @@
   },
   "durable_objects": {
     "bindings": [
-      { "name": "VOTE_SHARD", "class_name": "VoteShard" }
+      { "name": "VOTE_SHARD", "class_name": "VoteShard" },
+      { "name": "EVENT_COORDINATOR", "class_name": "EventCoordinator" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["VoteShard"] }
+    { "tag": "v1", "new_sqlite_classes": ["VoteShard"] },
+    { "tag": "v2", "new_sqlite_classes": ["EventCoordinator"] }
   ]
 }

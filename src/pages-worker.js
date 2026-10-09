@@ -4,17 +4,19 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
-    // Cache only the one public results URL. Ticketed votes and admin exports
+    // Cache canonical public result URLs. Votes, identities and admin exports
     // always go straight to the API Worker.
-    const publicResults = url.pathname === "/api/results" && request.method === "GET" &&
+    const resultsPath = url.pathname === "/api/results" || /^\/api\/events\/[a-f0-9]{24}\/results$/.test(url.pathname);
+    const publicResults = resultsPath && request.method === "GET" &&
       !url.search && !request.headers.has("Authorization");
     if (!publicResults) return env.WEVOTE_API.fetch(request);
 
-    const cached = await caches.default.match(request);
+    const cacheKey = new Request(url.origin + url.pathname);
+    const cached = await caches.default.match(cacheKey);
     if (cached) return cached;
     const response = await env.WEVOTE_API.fetch(request);
     if (response.ok && response.headers.get("Cache-Control")?.startsWith("public,")) {
-      context.waitUntil(caches.default.put(request, response.clone()));
+      context.waitUntil(caches.default.put(cacheKey, response.clone()));
     }
     return response;
   },

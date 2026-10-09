@@ -1,0 +1,48 @@
+.admin-shell { max-width: 1220px; }
+.admin-intro { padding: 58px 0 46px; max-width: 750px; }
+.kicker, .section-number { color: #376a82; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.admin-intro h1 { margin: 17px 0 17px; font-size: clamp(38px, 5vw, 61px); line-height: 1.25; letter-spacing: -.06em; }
+.admin-intro h1 em { color: #386d84; font-style: normal; }
+.admin-intro p, .admin-muted { color: #657482; line-height: 1.7; font-size: 14px; }
+.admin-card { padding: 30px 34px; }
+.admin-card h2 { margin: 12px 0 8px; }
+#login-panel { max-width: 620px; }
+.login-form, .event-form { display: grid; gap: 11px; margin-top: 24px; }
+.login-form label, .event-form label:not(.check-row) { color: #243d4e; font-size: 13px; font-weight: 700; }
+.event-form small { color: #82919b; font-weight: 500; }
+.login-form input, .event-form input:not([type=checkbox]), .event-form textarea { width: 100%; border: 1px solid #cbd7db; border-radius: 8px; padding: 12px 13px; background: #fbfcfb; color: #17283c; outline: none; }
+.event-form textarea { resize: vertical; line-height: 1.6; }
+.login-form input:focus, .event-form input:focus, .event-form textarea:focus { border-color: #35738d; box-shadow: 0 0 0 3px #dbeef2; }
+.login-form .primary-button, .event-form .primary-button { margin-top: 12px; }
+.check-row { display: flex; align-items: center; gap: 9px; margin-top: 4px; font-size: 13px; color: #243d4e; cursor: pointer; }
+.check-row input { width: 17px; height: 17px; accent-color: #376a82; }
+.admin-caveat { margin: 24px 0 0; padding: 15px; background: #f4f7f7; border-left: 3px solid #8eacb9; color: #5d6d78; font-size: 12px; line-height: 1.75; }
+.dashboard-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.text-button { border: 0; background: none; color: #376a82; text-decoration: underline; cursor: pointer; }
+.admin-grid { display: grid; grid-template-columns: minmax(350px, .9fr) minmax(420px, 1.1fr); gap: 20px; align-items: start; }
+.events-card { min-height: 410px; }
+.events-list { display: grid; gap: 16px; margin-top: 23px; }
+.event-item { border: 1px solid #d9e2e3; border-radius: 12px; padding: 21px; background: #fcfdfc; }
+.event-head { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
+.event-item h3 { margin: 0 0 5px; font-size: 17px; }
+.event-item .event-id { color: #8797a0; font-size: 11px; overflow-wrap: anywhere; }
+.event-item .event-times { color: #687a86; font-size: 12px; line-height: 1.6; margin: 13px 0; }
+.event-status { white-space: nowrap; background: #e7f1eb; color: #376458; border-radius: 6px; padding: 5px 8px; font-size: 11px; font-weight: 700; }
+.event-status.pending { background: #f6efe4; color: #7a633a; }
+.event-status.closed { background: #eef0f2; color: #66727b; }
+.share-box { border-top: 1px solid #e1e8e9; padding-top: 15px; display: flex; gap: 16px; align-items: center; }
+.qr-image { width: 118px; height: 118px; flex: 0 0 118px; background: white; border: 1px solid #d9e2e3; border-radius: 6px; }
+.share-info { min-width: 0; display: grid; gap: 9px; }
+.share-info a { overflow-wrap: anywhere; color: #285e78; font-size: 12px; }
+.share-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.small-button { border: 1px solid #bfcfd5; background: white; border-radius: 6px; color: #2a5267; font-size: 11px; padding: 7px 9px; cursor: pointer; text-decoration: none; }
+.small-button:hover { background: #edf5f8; }
+.top-actions { display: flex; align-items: center; gap: 22px; }
+.admin-link { color: #5c7380; font-size: 12px; text-decoration: none; font-weight: 700; }
+.admin-link:hover { color: #214760; text-decoration: underline; }
+@media (max-width: 900px) { .admin-grid { grid-template-columns: 1fr; } }
+@media (max-width: 610px) { .admin-intro { padding: 39px 0 28px; } .admin-card { padding: 24px 19px; } .admin-grid { gap: 15px; } .share-box { align-items: start; } .qr-image { width: 90px; height: 90px; flex-basis: 90px; } }
+
+.event-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 17px; padding-top: 14px; border-top: 1px solid #e1e8e9; }
+.small-button:disabled { cursor: default; opacity: .45; }
+.export-progress { font-size: 12px; line-height: 1.6; color: #607581; }

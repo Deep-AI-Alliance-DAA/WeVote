@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta name="theme-color" content="#f6f7f5">
+    <title>WeVote — 即時投票</title>
+    <meta name="description" content="簡單、公平、即時嘅大型活動投票系統。">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="WeVote 主頁"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M7 20.5 15.5 29 33 10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 30c9 6 22 7 32-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span>WeVote</span></a>
+        <div class="top-actions"><a class="admin-link" href="/admin.html">管理員</a><span class="top-note"><span class="top-dot" aria-hidden="true"></span> 即時投票系統</span></div>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <div class="intro-text">
+            <div class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span id="phase-label">正在連接投票場</span></div>
+            <h1 id="page-title">你嘅一票，<br><em>即時被記錄。</em></h1>
+            <p class="intro-copy">一個連結，一次選擇。投票期間即時睇到參與人數；截止後公開結果。</p>
+            <div class="intro-meta"><span>活動編號 <strong id="poll-id">—</strong></span><span>截止時間 <strong id="close-time">—</strong></span></div>
+          </div>
+          <div class="hero-art" aria-hidden="true"><img src="/assets/ballot-hero.webp" alt=""></div>
+        </section>
+
+        <div class="grid">
+          <section class="card vote-card" aria-labelledby="question-title">
+            <div class="card-heading"><span class="step"><svg class="step-icon" viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="m7 16 7 7L27 8" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M27 17c1 8-4 13-12 13C7 30 3 25 3 17 3 9 9 3 17 3c4 0 8 1 10 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>01 / 投票</span><span class="status-pill" id="status-pill">載入中</span></div>
+            <h2 id="question-title">正在載入問題…</h2>
+            <p class="card-subtitle" id="vote-subtitle">請稍候。</p>
+            <form id="vote-form" hidden>
+              <fieldset id="options" class="options"><legend class="sr-only">選擇一個答案</legend></fieldset>
+              <div class="verification"><span class="verification-label">安全驗證</span><div id="turnstile"></div></div>
+              <button type="submit" id="vote-button" class="primary-button" disabled>確認投票 <span aria-hidden="true">↗</span></button>
+            </form>
+            <div id="vote-message" class="message" role="status" aria-live="polite"></div>
+            <p class="privacy-note" id="privacy-note">投票連結只可使用一次。系統唔會喺公開結果顯示你嘅選擇。</p>
+          </section>
+
+          <aside class="card live-card" aria-labelledby="live-title">
+            <div class="card-heading"><span class="step"><svg class="step-icon" viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M4 24V10m7 15V16m7 9V6m7 19v-8m6 8V9" stroke="currentColor" stroke-width="2.7" stroke-linecap="round"/><path d="M2 29c9 2 21 2 30 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>02 / 即時動態</span><span class="signal"><span class="live-dot" aria-hidden="true"></span> LIVE</span></div>
+            <h2 id="live-title">參與情況</h2>
+            <div class="turnout"><strong id="turnout">—</strong><span>張有效票</span></div>
+            <div class="divider"></div>
+            <div class="detail-row"><span>狀態</span><strong id="phase-detail">—</strong></div>
+            <div class="detail-row"><span>距離截止</span><strong id="countdown">—</strong></div>
+            <div class="detail-row"><span>資料更新</span><strong id="updated-at">—</strong></div>
+            <div id="result-area" class="results" hidden><h3>最終結果</h3><div id="result-bars"></div></div>
+            <p class="live-footnote">票數約每 10 秒更新一次。正式結果喺投票截止後顯示。</p>
+            <a id="event-results-link" class="admin-link" href="/results.html" hidden>開啟結果頁 ↗</a>
+          </aside>
+        </div>
+      </main>
+      <footer>WeVote <span>·</span> Credits: <a href="https://daa.hk/">DAA.HK</a>, Hillman Tam and Keith Li</footer>
+    </div>
+  </body>
+</html>

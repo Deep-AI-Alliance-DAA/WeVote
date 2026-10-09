@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 
 const now = Date.now();
 const lines = [
+  'PUBLIC_BASE_URL="http://localhost:8787"',
   'POLL_ID="demo-local"',
   'POLL_QUESTION="你支持邊個方案？"',
   `POLL_OPTIONS_JSON='${JSON.stringify([{ id: "a", label: "方案 A" }, { id: "b", label: "方案 B" }])}'`,
@@ -11,6 +12,7 @@ const lines = [
   `VOTE_SIGNING_KEY="${randomBytes(32).toString("hex")}"`,
   'TURNSTILE_SITE_KEY="1x00000000000000000000AA"',
   'TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA"',
+  `ADMIN_DASHBOARD_KEY="${randomBytes(32).toString("hex")}"`,
   `ADMIN_EXPORT_KEY="${randomBytes(32).toString("hex")}"`,
 ];
 

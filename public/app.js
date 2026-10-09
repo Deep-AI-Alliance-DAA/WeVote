@@ -7,19 +7,30 @@ const elements = Object.fromEntries([
 
 let poll = null;
 let ticket = null;
+const eventId = new URLSearchParams(location.search).get("event");
+const publicEvent = eventId && /^[a-f0-9]{24}$/.test(eventId);
+const eventApi = publicEvent ? `/api/events/${eventId}` : null;
+let identityReady = false;
+let identityLoading = false;
+let pollLoading = false;
+let transientError = false;
 let turnstileToken = null;
 let turnstileWidget = null;
 let busy = false;
 let recorded = false;
 
-const fragment = new URLSearchParams(location.hash.slice(1));
-if (fragment.has("ticket")) {
-  ticket = fragment.get("ticket");
-  sessionStorage.setItem("wevote-ticket", ticket);
-  history.replaceState(null, "", location.pathname + location.search);
-} else {
-  ticket = sessionStorage.getItem("wevote-ticket");
+if (!eventId) {
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  if (fragment.has("ticket")) {
+    ticket = fragment.get("ticket");
+    sessionStorage.setItem("wevote-ticket", ticket);
+    history.replaceState(null, "", location.pathname + location.search);
+  } else {
+    ticket = sessionStorage.getItem("wevote-ticket");
+  }
 }
+
+const recordedKey = publicEvent ? `wevote-recorded:${eventId}` : `wevote-recorded:${ticket}`;
 
 function message(text, kind = "") {
   elements["vote-message"].textContent = text;
@@ -86,6 +97,7 @@ function renderCountdown() {
   if (!poll) return;
   const delta = new Date(poll.closesAt).getTime() - Date.now();
   if (delta <= 0) {
+    updateButton();
     elements.countdown.textContent = "已截止";
     if (poll.phase === "open" && Date.now() - lastCloseRefresh > 10_000) {
       lastCloseRefresh = Date.now();
@@ -101,18 +113,24 @@ function renderCountdown() {
 }
 
 function updateButton() {
-  elements["vote-button"].disabled = busy || recorded || !turnstileToken || !elements.options.querySelector("input:checked");
+  elements["vote-button"].disabled = busy || recorded || poll?.phase !== "open" || Date.now() >= Date.parse(poll.closesAt) || !(publicEvent ? identityReady : ticket) || !turnstileToken || !elements.options.querySelector("input:checked");
 }
 
 function renderPoll(data) {
   const first = !poll || poll.pollId !== data.pollId;
   poll = data;
+  const canVote = publicEvent ? identityReady : Boolean(ticket);
+  if (canVote) recorded = sessionStorage.getItem(recordedKey) === "yes";
   if (first) {
     renderOptions(data.options);
-    recorded = ticket ? sessionStorage.getItem(`wevote-recorded:${ticket}`) === "yes" : false;
-    if (ticket && !recorded && data.phase === "open") void loadTurnstile(data.turnstileSiteKey);
+    if (canVote && !recorded && data.phase === "open") void loadTurnstile(data.turnstileSiteKey);
   }
-  elements["poll-id"].textContent = data.pollId;
+  elements["poll-id"].textContent = data.name || data.pollId;
+  if (publicEvent) {
+    document.title = `${data.name} · WeVote`;
+    const reportLink = $("event-results-link");
+    if (reportLink) { reportLink.href = `/results.html?event=${eventId}`; reportLink.hidden = false; }
+  }
   elements["close-time"].textContent = formatTime(data.closesAt);
   elements["question-title"].textContent = data.question;
   elements.turnout.textContent = data.turnout.toLocaleString("zh-HK");
@@ -121,13 +139,14 @@ function renderPoll(data) {
   elements["phase-label"].textContent = labels[data.phase];
   elements["status-pill"].textContent = labels[data.phase];
   elements["phase-detail"].textContent = labels[data.phase];
-  elements["vote-form"].hidden = data.phase !== "open" || !ticket || recorded;
+  elements["vote-form"].hidden = data.phase !== "open" || !canVote || recorded;
   if (data.phase === "pending") elements["vote-subtitle"].textContent = `投票將於 ${formatTime(data.opensAt)} 開始。`;
   else if (data.phase === "closed") elements["vote-subtitle"].textContent = "投票已截止，多謝參與。";
-  else if (!ticket) elements["vote-subtitle"].textContent = "請使用主辦方派發嘅獨立投票連結進入。";
+  else if (!canVote) elements["vote-subtitle"].textContent = publicEvent ? "正在準備投票識別，請稍候。" : "請使用主辦方派發嘅獨立投票連結進入。";
   else if (recorded) elements["vote-subtitle"].textContent = "你嘅投票已經記錄。";
   else elements["vote-subtitle"].textContent = "揀一個選項，通過驗證後確認。提交後唔可以更改。";
-  if (data.phase === "open" && ticket && !recorded && turnstileWidget === null) void loadTurnstile(data.turnstileSiteKey);
+  if (data.phase === "open" && canVote && !recorded && turnstileWidget === null) void loadTurnstile(data.turnstileSiteKey);
+  if (publicEvent) document.getElementById("privacy-note").textContent = "同一瀏覽器每個活動只記錄一票；清除瀏覽器資料仍可能再次投票。公開結果唔會顯示個人選擇。";
   renderResults(data);
   renderCountdown();
   updateButton();
@@ -153,12 +172,35 @@ async function loadTurnstile(sitekey) {
 }
 
 async function loadPoll() {
+  if (pollLoading || (eventId && !publicEvent)) return;
+  pollLoading = true;
   try {
-    const response = await fetch("/api/results");
-    if (!response.ok) throw new Error("目前未能讀取投票資料。");
+    const response = await fetch(publicEvent ? `${eventApi}/results` : "/api/results");
+    if (!response.ok) throw new Error(response.status === 404 ? "搵唔到呢個活動，請檢查主辦方提供嘅連結。" : "目前未能讀取投票資料。");
     renderPoll(await response.json());
+    if (transientError && !busy && !recorded) { message(""); transientError = false; }
+    if (publicEvent && poll.phase !== "closed" && !identityReady) void loadIdentity();
   } catch (error) {
     message(error.message || "目前未能讀取投票資料。", "bad");
+    transientError = true;
+  } finally {
+    pollLoading = false;
+  }
+}
+
+async function loadIdentity() {
+  if (!publicEvent || identityReady || identityLoading || poll?.phase === "closed") return;
+  identityLoading = true;
+  try {
+    const response = await fetch(`${eventApi}/identity`, { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) throw new Error("目前未能準備投票識別，稍後會再試。");
+    identityReady = true;
+    if (poll) renderPoll(poll);
+  } catch (error) {
+    message(error.message || "目前未能準備投票識別。", "bad");
+    transientError = true;
+  } finally {
+    identityLoading = false;
   }
 }
 
@@ -166,20 +208,21 @@ elements.options.addEventListener("change", updateButton);
 elements["vote-form"].addEventListener("submit", async (event) => {
   event.preventDefault();
   const choice = elements.options.querySelector("input:checked");
-  if (!choice || !turnstileToken || !ticket || busy) return;
+  if (!choice || !turnstileToken || !(publicEvent ? identityReady : ticket) || busy || poll?.phase !== "open" || Date.now() >= Date.parse(poll.closesAt)) return;
   busy = true;
   updateButton();
   message("正在保存你嘅投票…");
   try {
-    const response = await fetch("/api/vote", {
+    const response = await fetch(publicEvent ? `${eventApi}/vote` : "/api/vote", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticket, optionId: choice.value, turnstileToken }),
+      credentials: "same-origin",
+      body: JSON.stringify({ ...(publicEvent ? {} : { ticket }), optionId: choice.value, turnstileToken }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "投票未能送出。");
     recorded = true;
-    sessionStorage.setItem(`wevote-recorded:${ticket}`, "yes");
+    sessionStorage.setItem(recordedKey, "yes");
     elements["vote-form"].hidden = true;
     elements["vote-subtitle"].textContent = "你嘅投票已經記錄。";
     message(result.duplicate ? "呢張票之前已經記錄，毋須重複提交。" : "投票成功！多謝參與。", "good");
@@ -194,6 +237,15 @@ elements["vote-form"].addEventListener("submit", async (event) => {
   }
 });
 
-void loadPoll();
-setInterval(loadPoll, 11_000);
+if (eventId && !publicEvent) {
+  elements["question-title"].textContent = "活動連結無效";
+  elements["vote-subtitle"].textContent = "請向主辦方索取正確嘅投票連結。";
+  message("活動編號格式錯誤。", "bad");
+} else {
+  void loadPoll();
+}
+setInterval(() => {
+  if (!document.hidden && poll?.phase !== "closed") void loadPoll();
+}, 11_000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) void loadPoll(); });
 setInterval(renderCountdown, 1000);
