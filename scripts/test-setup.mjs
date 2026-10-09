@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Run only temporary helper copies and an offline Wrangler stub.
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -135,11 +136,20 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd:
     { ...productionSecrets, ADMIN_EXPORT_KEY: productionSecrets.ADMIN_DASHBOARD_KEY },
     { ...productionSecrets, TURNSTILE_SITE_KEY: `1x${"0".repeat(25)}` },
     { ...productionSecrets, TURNSTILE_SECRET_KEY: `2x${"0".repeat(25)}` },
+    { ...productionSecrets, GOOGLE_CLIENT_ID: "fixture-web-client" },
+    { ...productionSecrets, GOOGLE_CLIENT_ID: "fixture-web-client", GOOGLE_CLIENT_SECRET: "" },
+    { ...productionSecrets, APPLE_SERVICE_ID: "hk.fixture.wevote" },
+    { ...productionSecrets, APPLE_SERVICE_ID: "hk.fixture.wevote", APPLE_TEAM_ID: "ABCDEFGHIJ", APPLE_KEY_ID: "KLMNOPQRST", APPLE_PRIVATE_KEY: malformedMarker },
   ]) {
     await writeJson(generated[2], badSecrets);
     await rejectDeploy(["api", "--dry-run"], "Invalid or reused deployment credentials are rejected");
   }
-  await writeJson(generated[2], productionSecrets);
+  const providerSecrets = {
+    ...productionSecrets, GOOGLE_CLIENT_ID: "fixture-web-client", GOOGLE_CLIENT_SECRET: "fixture-google-private-credential",
+    APPLE_SERVICE_ID: "hk.fixture.wevote", APPLE_TEAM_ID: "ABCDEFGHIJ", APPLE_KEY_ID: "KLMNOPQRST",
+    APPLE_PRIVATE_KEY: generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" }),
+  };
+  await writeJson(generated[2], providerSecrets);
   for (const accountId of [worker.account_id, "c".repeat(32)]) {
     await writeJson(generated[1], { ...pages, account_id: accountId });
     await rejectDeploy(["api", "--dry-run"], "An unsupported Pages account_id is rejected before API deployment");
@@ -179,13 +189,60 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd:
   check(trace[2].account === worker.account_id, "Pages deployment overrides an inherited account with the configured account");
   check(trace.filter((entry) => entry.kind === "wrangler").every((entry) => entry.metrics === "false"), "Wrangler telemetry is disabled");
   const invocationLog = JSON.stringify(trace);
-  check([...privateKeys, productionSecrets.TURNSTILE_SECRET_KEY].every((value) => !invocationLog.includes(value)), "Private credentials never appear in command arguments");
+  check([...privateKeys, productionSecrets.TURNSTILE_SECRET_KEY, providerSecrets.GOOGLE_CLIENT_SECRET, providerSecrets.APPLE_PRIVATE_KEY].every((value) => !invocationLog.includes(value)), "Private credentials never appear in command arguments");
   check(run("deploy-cloudflare.mjs", ["pages", "--with-private-assets"]).status === 0, "Private-asset Pages deployment reaches only offline stubs");
   const privateTrace = (await readTrace()).slice(trace.length);
   check(privateTrace.length === 2 && privateTrace[0].kind === "build" && privateTrace[1].kind === "wrangler", "Private-asset build runs before deployment");
   check(privateTrace[0].args.join("|") === "--with-private-assets", "Private-asset opt-in is passed to the build");
   check(privateTrace[1].args.join("|") === trace[2].args.join("|"), "Private assets do not change the Pages destination");
   check(privateTrace[1].account === worker.account_id, "Private-asset deployment uses the configured account");
+  const billingSecrets = {
+    ...providerSecrets,
+    STRIPE_SECRET_KEY: `rk_test_${"a".repeat(40)}`,
+    STRIPE_WEBHOOK_SECRET: `whsec_${"b".repeat(40)}`,
+    STRIPE_PRICE_ID: "price_OfflineOneEvent",
+    STRIPE_PRICE_AMOUNT: "12345", STRIPE_PRICE_CURRENCY: "hkd",
+    STRIPE_TEST_ORGANIZER_IDS: "1".repeat(24),
+  };
+  for (const name of ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_ID", "STRIPE_PRICE_AMOUNT", "STRIPE_PRICE_CURRENCY"]) {
+    const partial = { ...billingSecrets };
+    delete partial[name];
+    await writeJson(generated[2], partial);
+    await rejectDeploy(["api", "--dry-run"], "Partial Stripe configuration is rejected before Wrangler");
+  }
+  for (const changes of [
+    { STRIPE_SECRET_KEY: `pk_test_${"a".repeat(40)}` },
+    { STRIPE_SECRET_KEY: "sk_test_short" },
+    { STRIPE_WEBHOOK_SECRET: billingSecrets.STRIPE_SECRET_KEY },
+    { STRIPE_PRICE_ID: "prod_OfflineProduct" },
+    { STRIPE_PRICE_AMOUNT: "0" }, { STRIPE_PRICE_AMOUNT: "123.45" },
+    { STRIPE_PRICE_AMOUNT: "1e4" }, { STRIPE_PRICE_AMOUNT: "100000001" },
+    { STRIPE_PRICE_CURRENCY: "HKD" }, { STRIPE_PRICE_CURRENCY: "hk" },
+    { STRIPE_TEST_ORGANIZER_IDS: undefined }, { STRIPE_TEST_ORGANIZER_IDS: "" },
+    { STRIPE_TEST_ORGANIZER_IDS: "*" }, { STRIPE_TEST_ORGANIZER_IDS: "root" },
+    { STRIPE_TEST_ORGANIZER_IDS: "A".repeat(24) },
+    { STRIPE_TEST_ORGANIZER_IDS: `${"1".repeat(24)},${"1".repeat(24)}` },
+    { STRIPE_TEST_ORGANIZER_IDS: `${"1".repeat(24)},` },
+    { STRIPE_SECRET_KEY: `rk_live_${"a".repeat(40)}` },
+  ]) {
+    await writeJson(generated[2], { ...billingSecrets, ...changes });
+    const before = (await readTrace()).length;
+    const rejection = run("deploy-cloudflare.mjs", ["api", "--dry-run"]);
+    check(rejection.status !== 0, "Unsafe Stripe or test-mode configuration is rejected");
+    check((await readTrace()).length === before, "Unsafe Stripe configuration invokes no child command");
+    check(!`${rejection.stdout}${rejection.stderr}`.includes(billingSecrets.STRIPE_SECRET_KEY) && !`${rejection.stdout}${rejection.stderr}`.includes(billingSecrets.STRIPE_WEBHOOK_SECRET), "Stripe rejection does not print private credentials");
+  }
+  for (const type of ["rk_test", "sk_test", "rk_live", "sk_live"]) {
+    const complete = { ...billingSecrets, STRIPE_SECRET_KEY: `${type}_${"a".repeat(40)}` };
+    if (type.endsWith("live")) delete complete.STRIPE_TEST_ORGANIZER_IDS;
+    await writeJson(generated[2], complete);
+    const accepted = run("deploy-cloudflare.mjs", ["api", "--dry-run"]);
+    check(accepted.status === 0, "Complete test/live Stripe configuration accepts secret and restricted API keys offline");
+    check(!`${accepted.stdout}${accepted.stderr}`.includes(complete.STRIPE_SECRET_KEY) && !`${accepted.stdout}${accepted.stderr}`.includes(complete.STRIPE_WEBHOOK_SECRET), "Successful validation does not print Stripe credentials");
+  }
+  const billingTrace = JSON.stringify(await readTrace());
+  check(!billingTrace.includes(billingSecrets.STRIPE_SECRET_KEY) && !billingTrace.includes(billingSecrets.STRIPE_WEBHOOK_SECRET), "Stripe keys never appear in child-command arguments");
+  await writeJson(generated[2], providerSecrets);
   console.log(`Offline Cloudflare helper checks passed (${checks} assertions).`);
 } finally {
   await rm(fixture, { recursive: true, force: true });

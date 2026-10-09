@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createPrivateKey } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +63,52 @@ try {
     for (const name of ["TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY"]) {
       if (typeof secrets[name] !== "string" || !/^[a-zA-Z0-9_-]{20,100}$/.test(secrets[name]) || /^[123]x/.test(secrets[name]) || /replace|example|change.?me/i.test(secrets[name])) {
         throw new Error(`${name} needs a real production Turnstile key. Testing keys are not accepted for deployment.`);
+      }
+    }
+    // Providers are optional. Reject partial groups instead of silently
+    // deploying a registration button whose backend cannot authenticate.
+    for (const names of [
+      ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+      ["APPLE_SERVICE_ID", "APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"],
+    ]) {
+      if (!names.some((name) => secrets[name] !== undefined && secrets[name] !== "")) continue;
+      for (const name of names) {
+        const maximum = { APPLE_PRIVATE_KEY: 16_384, APPLE_SERVICE_ID: 256, APPLE_TEAM_ID: 64, APPLE_KEY_ID: 64, GOOGLE_CLIENT_SECRET: 4096, GOOGLE_CLIENT_ID: 1024 }[name];
+        if (typeof secrets[name] !== "string" || !secrets[name].trim() || secrets[name].length > maximum || /replace|example|change.?me/i.test(secrets[name])) {
+          throw new Error(`${name} is missing or invalid. Supply the complete provider group, or omit it to keep that provider disabled.`);
+        }
+      }
+      if (names[0] === "APPLE_SERVICE_ID") {
+        let key;
+        try { key = createPrivateKey(secrets.APPLE_PRIVATE_KEY.replace(/\\n/g, "\n")); } catch { /* Filename-only error below. */ }
+        if (key?.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") {
+          throw new Error("APPLE_PRIVATE_KEY must be the Sign in with Apple P-256 private key; its contents are never included in errors.");
+        }
+      }
+    }
+    // Billing stays disabled when omitted. A test key must never expose
+    // simulated payment credits to public organizers on this deployment.
+    const billing = { ...worker.vars, ...secrets };
+    const stripeFields = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_ID", "STRIPE_PRICE_AMOUNT", "STRIPE_PRICE_CURRENCY"];
+    if ([...stripeFields, "STRIPE_TEST_ORGANIZER_IDS"].some((name) => billing[name] !== undefined && billing[name] !== "")) {
+      for (const name of stripeFields) {
+        if (typeof billing[name] !== "string" || !billing[name].trim() || billing[name].length > 4096 || /replace|example|change.?me/i.test(billing[name])) {
+          throw new Error(`${name} is missing or invalid. Supply the complete Stripe group, or omit it to keep billing disabled.`);
+        }
+      }
+      if (!/^(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{16,4096}$/.test(billing.STRIPE_SECRET_KEY)) throw new Error("STRIPE_SECRET_KEY must be a private test or live Stripe API key; restricted keys are supported.");
+      if (!/^whsec_[A-Za-z0-9]{16,256}$/.test(billing.STRIPE_WEBHOOK_SECRET)) throw new Error("STRIPE_WEBHOOK_SECRET must be the signing secret for this webhook destination.");
+      if (!/^price_[A-Za-z0-9]{1,256}$/.test(billing.STRIPE_PRICE_ID)) throw new Error("STRIPE_PRICE_ID must identify the approved one-time Stripe Price.");
+      const amount = Number(billing.STRIPE_PRICE_AMOUNT);
+      if (!/^[1-9]\d*$/.test(billing.STRIPE_PRICE_AMOUNT) || !Number.isSafeInteger(amount) || amount > 100_000_000) throw new Error("STRIPE_PRICE_AMOUNT must be a positive integer of at most 100000000 minor units.");
+      if (!/^[a-z]{3}$/.test(billing.STRIPE_PRICE_CURRENCY)) throw new Error("STRIPE_PRICE_CURRENCY must be a three-letter lowercase currency code.");
+      if (/^(?:sk|rk)_test_/.test(billing.STRIPE_SECRET_KEY)) {
+        const ids = typeof billing.STRIPE_TEST_ORGANIZER_IDS === "string" ? billing.STRIPE_TEST_ORGANIZER_IDS.split(",").map((id) => id.trim()) : [];
+        if (!ids.length || ids.length > 100 || ids.some((id) => !/^[a-f0-9]{24}$/.test(id)) || new Set(ids).size !== ids.length) {
+          throw new Error("STRIPE_TEST_ORGANIZER_IDS must explicitly allow valid organizer account IDs before deploying test billing.");
+        }
+      } else if (billing.STRIPE_TEST_ORGANIZER_IDS !== undefined && billing.STRIPE_TEST_ORGANIZER_IDS !== "") {
+        throw new Error("Remove STRIPE_TEST_ORGANIZER_IDS when switching billing to live mode; test and live credits remain separate.");
       }
     }
     await run([wrangler, "deploy", "--config", "wrangler.worker.local.jsonc", "--secrets-file", ".env.production.json", ...(dryRun ? ["--dry-run", "--outdir", ".cloudflare/dry-run"] : [])], root, worker.account_id);

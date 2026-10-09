@@ -32,6 +32,10 @@ jobs:
         run: npm ci
       - name: Check syntax
         run: npm run check
+      - name: Check social login and organizer quotas
+        run: npm run test:auth
+      - name: Check trial vote transactions and exports
+        run: npm run test:trial
       - name: Check event config cache
         run: npm run test:cache
       - name: Check local and deployment setup

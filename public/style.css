@@ -37,6 +37,12 @@ h2 { margin: 22px 0 8px; font-size: 24px; line-height: 1.45; letter-spacing: -.0
 .option:has(input:checked) { border-color: #35738d; background: #edf5f8; box-shadow: 0 0 0 2px #d1e8ef; }
 .option input { appearance: none; width: 19px; height: 19px; margin: 0; border: 2px solid #8298a7; border-radius: 50%; flex: 0 0 auto; background: white; }
 .option input:checked { border: 5px solid #35738d; }
+.option input[type="checkbox"] { border-radius: 4px; }
+.option input[type="checkbox"]:checked { border-width: 2px; background: var(--event-accent, #35738d); box-shadow: inset 0 0 0 3px #fff; }
+.option:has(input:disabled):not(:has(input:checked)) { opacity: .58; cursor: not-allowed; }
+.option:has(input:disabled):hover { background: #fff; border-color: #cdd8de; }
+.choice-guidance { margin: 0 0 12px; color: var(--event-strong, #214760); font-size: 12px; font-weight: 600; line-height: 1.75; }
+.result-note { margin: -5px 0 16px; color: #607482; font-size: 11px; line-height: 1.7; }
 .option input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid #bd8e78; outline-offset: 3px; }
 .option span { font-size: 14px; font-weight: 600; }
 .verification { min-height: 104px; margin-top: 22px; }

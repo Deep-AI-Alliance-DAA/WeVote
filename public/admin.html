@@ -9,25 +9,29 @@
     <title>WeVote — 活動管理</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="/admin.css">
+    <link rel="stylesheet" href="/admin.css?v=20261009-billing">
     <link rel="stylesheet" href="/share.css">
-    <script type="module" src="/admin.js"></script>
+    <link rel="stylesheet" href="/onboarding.css?v=20261009-onboarding">
+    <script type="module" src="/admin.js?v=20261009-billing"></script>
   </head>
   <body>
     <div class="shell admin-shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="WeVote 主頁"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M7 20.5 15.5 29 33 10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 30c9 6 22 7 32-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span>WeVote</span></a>
-        <span class="top-note"><span class="top-dot" aria-hidden="true"></span> 活動管理</span>
+        <div class="admin-top-tools"><span class="top-note"><span class="top-dot" aria-hidden="true"></span> 活動管理</span><button id="onboarding-help" class="guide-button" type="button" aria-label="開啟使用導覽" disabled><span aria-hidden="true">?</span> 使用導覽</button></div>
       </header>
 
       <main>
         <div class="admin-intro"><span class="kicker">WEVOTE / ADMIN</span><h1>開一場投票，<br><em>即刻分享畀大家。</em></h1><p>建立 event 後，就會有一條公開投票連結同 QR code。活動按你設定嘅時間自動開始、截止。</p></div>
 
         <section id="login-panel" class="card admin-card" aria-labelledby="login-title">
-          <div class="section-number">01 / 管理員登入</div>
-          <h2 id="login-title">登入你嘅管理帳戶</h2>
-          <p class="admin-muted">輸入擁有人提供嘅個人登入密鑰。登入狀態有效 8 小時；用完請登出。</p>
-          <form id="login-form" class="login-form"><label for="admin-key">管理員登入密鑰</label><input id="admin-key" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"><button id="login-button" class="primary-button" type="submit">登入 <span aria-hidden="true">↗</span></button></form>
+          <div class="section-number">01 / 主辦方登入</div>
+          <h2 id="login-title">登入，開你嘅第一場投票。</h2>
+          <p class="admin-muted">免費試用可建立一個活動，最多 10,000 張有效投票，投票期間最長 24 小時。草稿亦計入配額；投票者毋須登入。</p>
+          <div id="auth-providers" class="auth-providers" hidden><a id="google-login" class="oauth-button" href="/api/auth/google/start" hidden><span class="oauth-mark" aria-hidden="true">G</span>用 Google 登入<span aria-hidden="true">↗</span></a><a id="apple-login" class="oauth-button" href="/api/auth/apple/start" hidden><svg class="oauth-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15.8 4.2c.8-1 1.2-2.2 1.1-3.2-1.1.1-2.4.8-3.1 1.7-.7.8-1.3 2.1-1.1 3.1 1.2.1 2.4-.6 3.1-1.6ZM18.5 12.5c0-2.7 2.2-4 2.3-4.1-1.3-1.9-3.3-2.1-4-2.1-1.7-.2-3.3 1-4.2 1-.8 0-2.1-1-3.5-1-1.8 0-3.5 1.1-4.5 2.7-1.9 3.3-.5 8.2 1.4 10.9.9 1.4 2 2.8 3.4 2.7 1.3 0 1.9-.9 3.5-.9 1.6 0 2.1.9 3.5.9 1.4 0 2.3-1.3 3.3-2.7 1.1-1.6 1.5-3.2 1.5-3.3-.1 0-2.7-1.1-2.7-4.1Z"/></svg>用 Apple 登入<span aria-hidden="true">↗</span></a></div>
+          <p id="auth-provider-message" class="auth-provider-message" role="status" aria-live="polite">正在確認登入方式…</p>
+          <p id="auth-callback-message" class="message" role="status" aria-live="polite"></p>
+          <details id="staff-login" class="staff-login"><summary>管理員密鑰登入</summary><p class="admin-muted">已有團隊帳戶？輸入擁有人提供嘅個人登入密鑰。登入狀態有效 8 小時；用完請登出。</p><form id="login-form" class="login-form"><label for="admin-key">管理員登入密鑰</label><input id="admin-key" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"><button id="login-button" class="primary-button" type="submit">密鑰登入 <span aria-hidden="true">↗</span></button></form></details>
           <p class="message" id="login-message" role="status" aria-live="polite"></p>
           <button id="retry-logout" class="small-button" type="button" hidden>重試登出</button>
         </section>
@@ -48,21 +52,38 @@
             <section class="card admin-card" aria-labelledby="create-title">
               <div class="section-number">01 / 新活動</div>
               <h2 id="create-title">建立投票 event</h2>
-              <p class="admin-muted">同一條公開 link／QR 可以畀所有人使用。可以先儲存草稿核對內容，發佈後先接受投票；活動開始後題目同選項會鎖定。</p>
+              <p class="admin-muted">同一條公開 link／QR 可以畀所有人使用。可以先儲存草稿核對內容，發佈後先接受投票；活動開始後題目、選項同投票方式會鎖定。</p>
+              <div id="creation-quota" class="creation-quota" role="status" aria-live="polite" hidden><strong id="creation-quota-title"></strong><p id="creation-quota-message"></p><a id="quota-event-link" href="#events-title" hidden>管理已有活動 <span aria-hidden="true">↓</span></a></div>
+              <section id="billing-panel" class="billing-panel" aria-labelledby="billing-title" hidden>
+                <div class="billing-heading"><h3 id="billing-title">再開一場活動</h3><span id="billing-test-label" class="billing-test-label" hidden>測試模式</span></div>
+                <p id="billing-balance"></p>
+                <p id="billing-offer" class="billing-offer" hidden></p>
+                <p id="billing-test-note" class="billing-note" hidden>測試結帳只供獲授權測試帳戶使用，唔會收取真實款項；測試額度同正式額度分開。</p>
+                <p class="billing-note">付款會喺 Stripe 嘅安全結帳頁完成。WeVote 唔會保存信用卡號碼。</p>
+                <p class="billing-note"><a href="/service.html">查看服務、付款、退款查詢及私隱說明 <span aria-hidden="true">↗</span></a></p>
+                <div class="billing-actions"><button id="billing-buy" class="small-button" type="button" hidden>前往 Stripe 安全結帳</button><button id="billing-resume" class="small-button" type="button" hidden>繼續同一結帳</button><button id="billing-use-credit" class="small-button" type="button" hidden>使用額度建立活動</button><button id="billing-check" class="small-button" type="button">檢查付款及額度</button></div>
+                <p id="billing-message" class="message" role="status" aria-live="polite"></p>
+              </section>
               <form id="event-form" class="event-form">
+                <fieldset id="create-fields" class="create-fields"><legend class="sr-only">新投票活動內容</legend>
                 <label for="event-name">活動名稱</label><input id="event-name" name="name" required maxlength="100" placeholder="例：年度會員大會">
                 <label for="event-question">投票問題</label><textarea id="event-question" name="question" required maxlength="300" rows="3" placeholder="例：你支持邊個方案？"></textarea>
                 <label for="event-options">選項 <small>每行一項，2–20 項</small></label><textarea id="event-options" name="options" required rows="8" placeholder="方案 A&#10;方案 B"></textarea>
+                <label for="event-selection-mode">投票方式</label><select id="event-selection-mode" aria-describedby="event-choice-help"><option value="single" selected>單選 · 每張投票揀一項</option><option value="multiple">多選 · 每張投票可揀幾項</option></select>
+                <div id="event-max-choices-field" class="event-choice-limit" hidden><label for="event-max-choices">每張投票最多可選 <small>2–20 項，唔可多過選項數目</small></label><input id="event-max-choices" type="number" min="2" max="20" step="1" value="2" aria-describedby="event-choice-help" disabled></div>
+                <p id="event-choice-help" class="event-setting-help" aria-live="polite">每張投票只可選 1 項；成功提交先會記錄。</p>
                 <label class="check-row"><input id="save-draft" type="checkbox"> 儲存為草稿</label>
                 <p id="draft-help" class="event-setting-help" hidden>草稿只供預覽，唔接受投票。可先設定預定時間，之後喺活動編輯器發佈。</p>
                 <label class="check-row"><input id="open-now" type="checkbox" checked> 建立後即刻開始</label>
                 <label for="opens-at" id="opens-label" hidden>開始時間 <small>香港時間</small></label><input id="opens-at" type="datetime-local" hidden>
                 <label for="closes-at">截止時間 <small>香港時間</small></label><input id="closes-at" type="datetime-local" required>
                 <label for="results-visibility">公開結果時間</label><select id="results-visibility"><option value="live" selected>即時公開 · 顯示票數及百分比</option><option value="after-close">截止後公開 · 期間只顯示總票數</option></select>
+                </fieldset>
                 <button class="primary-button" type="submit" id="create-button">建立 event <span aria-hidden="true">↗</span></button>
+                <button class="primary-button" type="button" id="retry-create-button" hidden>重試建立同一活動 <span aria-hidden="true">↗</span></button>
               </form>
               <p id="create-message" class="message" role="status" aria-live="polite"></p>
-              <p class="admin-caveat">公開連結只可以盡量防重複：系統以瀏覽器識別同 Turnstile 驗證，但清除 cookie 或換裝置仍可能再投。正式結果如需「一人一票」，要改用每人獨立票據。</p>
+              <p class="admin-caveat">公開連結只可以盡量防重複：系統以瀏覽器識別同 Turnstile 驗證，但清除 cookie 或換裝置仍可能再投。獨立票據只保證每張票據最多提交一次，主辦方仍須核實資格及控制派票。</p>
             </section>
 
             <section class="card admin-card events-card" aria-labelledby="events-title">
@@ -76,7 +97,7 @@
           </div>
         </div>
       </main>
-      <footer>WeVote <span>·</span> Credits: <a href="https://daa.hk/">DAA.HK</a>, Hillman Tam and Keith Li</footer>
+      <footer>WeVote <span>·</span> Credits: <a href="https://daa.hk/">DAA.HK</a>, Hillman Tam and Keith Li <span>·</span> <a href="/service.html">服務及私隱說明</a></footer>
     </div>
   </body>
 </html>

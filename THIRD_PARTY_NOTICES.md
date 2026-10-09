@@ -37,6 +37,40 @@ SOFTWARE.
 
 The upstream source also notes that “QR Code” is a registered trademark of DENSO WAVE INCORPORATED.
 
+## jose 6.2.12
+
+`jose` 6.2.12 by Filip Skokan is an npm runtime dependency used by the API Worker for JWT/JWK validation and Apple client assertions.
+
+- Project: https://github.com/panva/jose
+- Package: https://www.npmjs.com/package/jose/v/6.2.12
+- License: MIT
+
+The complete license from the installed package's `LICENSE.md` follows:
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2018 Filip Skokan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Original project artwork
 
 `public/assets/ballot-hero.webp` was generated for WeVote with AI assistance. The favicon and interface drawings were created for this project. These original project assets are distributed under the repository's MIT license.

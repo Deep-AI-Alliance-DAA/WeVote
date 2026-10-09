@@ -1,3 +1,5 @@
+import { formatOffer } from "./billing.js";
+
 const eventPattern = /^[a-f0-9]{24}$/;
 const eventId = new URLSearchParams(location.search).get("event");
 const fragment = new URLSearchParams(location.hash.slice(1));
@@ -46,4 +48,35 @@ if ((eventId && eventPattern.test(eventId)) || fragment.has("ticket")) {
     input.value = eventId;
     showError();
   }
+
+  async function loadOrganizerProviders() {
+    const status = document.getElementById("home-auth-message");
+    const planStatus = document.getElementById("home-plan-message");
+    try {
+      const response = await fetch("/api/auth/providers", { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(15_000) });
+      if (!response.ok) throw new Error("Provider status unavailable");
+      const providers = await response.json();
+      const google = providers.google === true;
+      const apple = providers.apple === true;
+      document.getElementById("home-google-login").hidden = !google;
+      document.getElementById("home-apple-login").hidden = !apple;
+      document.getElementById("home-auth-providers").hidden = !google && !apple;
+      status.textContent = google || apple ? "只需主辦方登入；投票者毋須註冊。" : "Google／Apple 登入尚未設定好，公開註冊暫未開放。管理員仍可用密鑰登入。";
+      const offer = providers.billing?.offer;
+      if (providers.billing?.enabled === true && offer?.livemode === true && formatOffer(offer)) {
+        document.getElementById("home-paid-price").textContent = `HK$${new Intl.NumberFormat("zh-HK", { maximumFractionDigits: 2 }).format(offer.amountMinor / 100)}`;
+        document.getElementById("home-paid-votes").textContent = `最多 ${offer.voteLimit.toLocaleString("zh-HK")} 張有效票`;
+        const duration = offer.maxDurationHours % 24 === 0 ? `${offer.maxDurationHours / 24} 日` : `${offer.maxDurationHours} 小時`;
+        document.getElementById("home-paid-duration").textContent = `投票期最多 ${duration}`;
+        document.getElementById("home-paid-plan").hidden = false;
+        planStatus.textContent = "";
+      } else {
+        planStatus.textContent = "目前未有公開加購方案；你可以先免費試用。";
+      }
+    } catch {
+      status.textContent = "暫時未能確認主辦方登入方式，請到管理員入口再試。";
+      planStatus.textContent = "暫時未能載入額外活動方案，請登入後查看。";
+    }
+  }
+  void loadOrganizerProviders();
 }

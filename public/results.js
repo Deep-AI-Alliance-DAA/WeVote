@@ -5,6 +5,7 @@ const reportElements = Object.fromEntries([
   "report-visibility", "report-opens", "report-closes", "report-updated", "waiting-results", "waiting-title",
   "waiting-copy", "final-results", "results-rows", "result-total", "export-note", "report-id", "vote-link",
   "csv-button", "print-button", "refresh-button", "results-title", "results-empty", "fullscreen-button", "report-dashboard", "event-presentation",
+  "report-choice-mode", "result-count-heading", "result-percent-heading", "result-percent-note",
 ].map((id) => [id, document.getElementById(id)]));
 
 const reportEventId = new URLSearchParams(location.search).get("event");
@@ -21,6 +22,15 @@ function formatReportTime(value) {
 
 function reportCount(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function reportMaxChoices(report) {
+  return Number.isInteger(report?.maxChoices) && report.maxChoices >= 1 && report.maxChoices <= report.options.length ? report.maxChoices : 1;
+}
+
+function reportChoiceMode(report) {
+  const maximum = reportMaxChoices(report);
+  return maximum > 1 ? `多選 · 每張選票最多選 ${maximum} 項` : "單選 · 每張選票選 1 項";
 }
 
 function canExportReport() {
@@ -42,6 +52,7 @@ function renderReport(data) {
   const canExport = canExportReport();
   const hasCounts = hasReportCounts(data);
   const turnout = reportCount(data.turnout);
+  const multiple = reportMaxChoices(data) > 1;
   const phase = reportLabels[data.phase] || "讀取活動資料中";
   const pending = data.phase === "pending";
   const pendingCopy = `投票將於 ${formatReportTime(data.opensAt)}（香港時間）開始。${data.resultsVisibility === "live" ? "開始投票後會即時公開各選項票數及百分比。" : "各選項票數及百分比會於截止後公開。"}`;
@@ -52,12 +63,18 @@ function renderReport(data) {
   reportElements["report-phase"].textContent = phase;
   reportElements["report-turnout"].textContent = turnout.toLocaleString("zh-HK");
   reportElements["report-visibility"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。以下內容只供預覽。" : pending ? pendingCopy : closed
-    ? turnout === 0 ? "活動已截止，未有已記錄投票。" : "投票已截止，以下顯示各選項嘅已記錄票數。"
-    : `${turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票。"}開啟連結或掃碼唔會計票。每 3 秒自動更新票數${hasCounts ? "。" : "，各選項結果會於截止後公開。"}`;
+    ? turnout === 0 ? "活動已截止，未有已記錄投票。" : multiple ? "投票已截止，以下顯示各選項嘅選取次數；一張選票可以選多項。" : "投票已截止，以下顯示各選項嘅已記錄票數。"
+    : `${turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票。"}開啟連結或掃碼唔會計票。每 1 秒自動更新票數${hasCounts ? "。" : "，各選項結果會於截止後公開。"}`;
   reportElements["report-opens"].textContent = formatReportTime(data.opensAt);
   reportElements["report-closes"].textContent = formatReportTime(data.closesAt);
   reportElements["report-updated"].textContent = formatReportTime(data.updatedAt);
   reportElements["report-id"].textContent = reportEventId;
+  reportElements["report-choice-mode"].textContent = reportChoiceMode(data);
+  reportElements["result-count-heading"].textContent = multiple ? "選取次數" : "票數";
+  reportElements["result-percent-heading"].textContent = multiple ? "選票比例" : "百分比";
+  reportElements["result-percent-note"].textContent = multiple
+    ? "每個選項嘅比例＝選取次數 ÷ 已記錄選票數。一張選票可以選多項，所以比例合計可以超過 100%。四捨五入至小數點後一位。"
+    : "百分比按已記錄票數計算，四捨五入至小數點後一位。";
   reportElements["report-content"].hidden = false;
   reportElements["waiting-results"].hidden = hasCounts;
   reportElements["final-results"].hidden = !hasCounts;
@@ -65,11 +82,11 @@ function renderReport(data) {
   reportElements["print-button"].disabled = !canExport;
   reportElements["export-note"].textContent = data.phase === "draft" ? "草稿未發佈，暫時未有投票報告。" : canExport ? closed ? "下載完整票數摘要，或使用瀏覽器列印功能另存 PDF。" : "可保存目前票數摘要。活動仍在進行，報告會標示「未截止」及資料更新時間。" : "各選項結果公開後可下載 CSV，或列印及另存 PDF。";
   reportElements["waiting-title"].textContent = data.phase === "draft" ? "草稿預覽" : pending ? "等待投票開始" : data.phase === "closed" ? "結果整理中" : "投票截止後公布結果";
-  reportElements["waiting-copy"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。主辦方發佈後先會按設定開放投票同顯示結果。" : pending ? pendingCopy : data.phase === "closed" ? "活動已截止，正在讀取最終結果。請稍候。" : "活動進行期間只顯示參與人數。各選項票數及百分比會喺截止後公開。";
+  reportElements["waiting-copy"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。主辦方發佈後先會按設定開放投票同顯示結果。" : pending ? pendingCopy : data.phase === "closed" ? "活動已截止，正在讀取最終結果。請稍候。" : "活動進行期間只顯示已記錄選票數。各選項結果會喺截止後公開。";
 
   if (hasCounts) {
     reportElements["results-title"].textContent = closed ? "最終投票分佈" : "即時結果（未截止）";
-    reportElements["result-total"].textContent = `共 ${turnout.toLocaleString("zh-HK")} 票`;
+    reportElements["result-total"].textContent = multiple ? `共 ${turnout.toLocaleString("zh-HK")} 張選票` : `共 ${turnout.toLocaleString("zh-HK")} 票`;
     reportElements["results-empty"].hidden = turnout !== 0;
     reportElements["results-empty"].textContent = data.phase === "closed" ? "活動已截止，未有已記錄投票。" : "暫時未有人投票。";
     const rows = data.options.map((option) => {
@@ -135,12 +152,16 @@ reportElements["csv-button"].addEventListener("click", () => {
   if (!canExportReport()) return;
   const report = currentReport;
   const turnout = reportCount(report.turnout);
+  const multiple = reportMaxChoices(report) > 1;
   const rows = [
     [report.phase === "closed" ? "WeVote 活動最終結果" : "WeVote 即時結果（未截止）"], ["活動名稱", report.name], ["活動編號", reportEventId], ["投票題目", report.question],
     ["主辦單位", report.presentation?.organizer || ""], ["活動介紹", report.presentation?.description || ""],
+    ["投票模式", multiple ? "多選" : "單選"], ["每張選票最多選項", reportMaxChoices(report)],
+    ["百分比分母", "已記錄選票數"], ["百分比計算", "選項選取次數 ÷ 已記錄選票數 × 100%"],
+    ...(multiple ? [["多選說明", "一張選票可以選多項；比例合計可以超過 100%。"], ["選取總次數", report.options.reduce((sum, option) => sum + reportCount(report.counts[option.id]), 0)]] : []),
     ["開始時間（香港）", formatReportTime(report.opensAt)], ["截止時間（香港）", formatReportTime(report.closesAt)],
     ["資料更新（香港）", formatReportTime(report.updatedAt)], ["匯出時間（香港）", formatReportTime(Date.now())],
-    ["狀態", report.phase === "closed" ? reportLabels[report.phase] : `${reportLabels[report.phase]}（未截止）`], ["已記錄票數", turnout], [], ["選項", "票數", "百分比"],
+    ["狀態", report.phase === "closed" ? reportLabels[report.phase] : `${reportLabels[report.phase]}（未截止）`], ["已記錄票數", turnout], [], ["選項", multiple ? "選取次數" : "票數", multiple ? "選票比例" : "百分比"],
     ...report.options.map((option) => {
       const count = reportCount(report.counts[option.id]);
       return [option.label, count, `${(turnout > 0 ? count / turnout * 100 : 0).toFixed(1)}%`];
@@ -186,7 +207,7 @@ if (validReportEvent) {
   void loadReport();
   setInterval(() => {
     if (!document.hidden && (!currentReport || currentReport.phase !== "closed" || !canExportReport())) void loadReport();
-  }, 3_000);
+  }, 1_000);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) void loadReport();
   });
