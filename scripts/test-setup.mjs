@@ -68,7 +68,8 @@ try {
   const worker = await json(generated[0]);
   const pages = await json(generated[1]);
   const secrets = await json(generated[2]);
-  check(worker.account_id === "a".repeat(32) && pages.account_id === worker.account_id, "Worker and Pages use the same account");
+  check(worker.account_id === "a".repeat(32), "Worker configuration pins the requested account");
+  check(!Object.hasOwn(pages, "account_id"), "Pages configuration omits the unsupported account_id field");
   check(worker.kv_namespaces.length === 1 && worker.kv_namespaces[0].binding === "EVENTS" && worker.kv_namespaces[0].id === "b".repeat(32), "KV binding uses the requested namespace");
   check(pages.services.length === 1 && pages.services[0].binding === "WEVOTE_API" && pages.services[0].service === worker.name, "Pages service targets the generated Worker");
   check(worker.workers_dev === false && worker.preview_urls === false, "Direct Worker and preview URLs are disabled");
@@ -139,13 +140,17 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd:
     await rejectDeploy(["api", "--dry-run"], "Invalid or reused deployment credentials are rejected");
   }
   await writeJson(generated[2], productionSecrets);
+  for (const accountId of [worker.account_id, "c".repeat(32)]) {
+    await writeJson(generated[1], { ...pages, account_id: accountId });
+    await rejectDeploy(["api", "--dry-run"], "An unsupported Pages account_id is rejected before API deployment");
+    await rejectDeploy(["pages"], "An unsupported Pages account_id is rejected before Pages build/deployment");
+  }
   for (const badPages of [
-    { ...pages, account_id: "c".repeat(32) },
     { ...pages, services: [{ binding: "WEVOTE_API", service: "wrong-api" }] },
     { ...pages, pages_build_output_dir: "../../another-directory" },
   ]) {
     await writeJson(generated[1], badPages);
-    await rejectDeploy(["api", "--dry-run"], "Inconsistent account or service configuration is rejected");
+    await rejectDeploy(["api", "--dry-run"], "Inconsistent Pages service or output configuration is rejected");
   }
   await writeJson(generated[1], pages);
   for (const badWorker of [
@@ -180,6 +185,7 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd:
   check(privateTrace.length === 2 && privateTrace[0].kind === "build" && privateTrace[1].kind === "wrangler", "Private-asset build runs before deployment");
   check(privateTrace[0].args.join("|") === "--with-private-assets", "Private-asset opt-in is passed to the build");
   check(privateTrace[1].args.join("|") === trace[2].args.join("|"), "Private assets do not change the Pages destination");
+  check(privateTrace[1].account === worker.account_id, "Private-asset deployment uses the configured account");
   console.log(`Offline Cloudflare helper checks passed (${checks} assertions).`);
 } finally {
   await rm(fixture, { recursive: true, force: true });

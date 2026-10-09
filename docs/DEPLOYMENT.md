@@ -63,6 +63,8 @@ Open `.env.production.json` in a local editor and fill in `TURNSTILE_SECRET_KEY`
 
 The API Worker has `workers_dev: false` and `preview_urls: false`; Pages accesses it through `WEVOTE_API`. Preserve the Durable Object binding/class names and migration history when upgrading an existing installation.
 
+Pages configuration does not accept `account_id`. The deployment helper selects the account for both API and Pages commands by setting `CLOUDFLARE_ACCOUNT_ID` from the validated Worker configuration, overriding any inherited account selection.
+
 ## 4. Deploy the API and Pages
 
 First compile and validate locally:

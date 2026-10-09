@@ -43,7 +43,9 @@ try {
   worker.kv_namespaces = [{ binding: "EVENTS", id: kvId }];
   const pages = {
     $schema: "../../node_modules/wrangler/config-schema.json",
-    name: pagesName, account_id: accountId,
+    // Pages configuration rejects account_id; deployment pins the CLI account
+    // through CLOUDFLARE_ACCOUNT_ID from the validated Worker configuration.
+    name: pagesName,
     pages_build_output_dir: "../../pages/dist",
     compatibility_date: worker.compatibility_date,
     services: [{ binding: "WEVOTE_API", service: workerName }],

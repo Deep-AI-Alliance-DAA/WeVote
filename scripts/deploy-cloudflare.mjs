@@ -39,7 +39,9 @@ try {
   const originOnly = publicUrl.protocol === "https:" && !publicUrl.username && !publicUrl.password &&
     publicUrl.pathname === "/" && !publicUrl.search && !publicUrl.hash &&
     !["localhost", "127.0.0.1", "[::1]"].includes(publicUrl.hostname);
-  if (!isId(worker.account_id) || worker.account_id !== pages.account_id ||
+  // Pages rejects account_id in its config. Pin both CLI invocations through
+  // CLOUDFLARE_ACCOUNT_ID using the validated Worker configuration instead.
+  if (!isId(worker.account_id) || pages.account_id !== undefined ||
       !isId(worker.kv_namespaces?.find((entry) => entry.binding === "EVENTS")?.id) ||
       !/^[a-z][a-z0-9-]{1,61}[a-z0-9]$/.test(worker.name || "") || worker.name === "wevote-local-api" ||
       !/^[a-z][a-z0-9-]{1,56}[a-z0-9]$/.test(pages.name || "") ||
