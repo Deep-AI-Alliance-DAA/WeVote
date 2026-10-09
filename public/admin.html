@@ -25,19 +25,30 @@
 
         <section id="login-panel" class="card admin-card" aria-labelledby="login-title">
           <div class="section-number">01 / 管理員登入</div>
-          <h2 id="login-title">輸入管理密鑰</h2>
-          <p class="admin-muted">密鑰只會暫存喺呢個瀏覽器分頁；關閉分頁後要重新輸入。</p>
-          <form id="login-form" class="login-form"><label for="admin-key">管理密鑰</label><input id="admin-key" type="password" required autocomplete="off" spellcheck="false"><button class="primary-button" type="submit">進入管理頁 <span aria-hidden="true">↗</span></button></form>
+          <h2 id="login-title">登入你嘅管理帳戶</h2>
+          <p class="admin-muted">輸入擁有人提供嘅個人登入密鑰。登入狀態有效 8 小時；用完請登出。</p>
+          <form id="login-form" class="login-form"><label for="admin-key">管理員登入密鑰</label><input id="admin-key" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false"><button id="login-button" class="primary-button" type="submit">登入 <span aria-hidden="true">↗</span></button></form>
           <p class="message" id="login-message" role="status" aria-live="polite"></p>
+          <button id="retry-logout" class="small-button" type="button" hidden>重試登出</button>
         </section>
 
         <div id="dashboard" hidden>
-          <div class="dashboard-top"><span class="section-number">管理控制台</span><button id="logout-button" class="text-button" type="button">登出</button></div>
+          <div class="dashboard-top"><div class="session-identity"><span class="section-number">管理控制台</span><strong id="current-user-name"></strong><span id="current-user-role" class="role-badge"></span></div><button id="logout-button" class="text-button" type="button">登出</button></div>
+          <section id="accounts-panel" class="card admin-card accounts-panel" aria-labelledby="accounts-title" hidden>
+            <div class="section-number">團隊管理 / 擁有人</div>
+            <h2 id="accounts-title">各人有自己嘅登入密鑰。</h2>
+            <p class="admin-muted">管理員可管理全部活動；活動管理員只可管理自己建立或獲分配嘅活動。</p>
+            <form id="account-form" class="account-form"><div><label for="account-name">帳戶名稱</label><input id="account-name" required maxlength="80" placeholder="同事或團隊名稱" autocomplete="off"></div><div><label for="account-role">權限</label><select id="account-role"><option value="organizer">活動管理員 · 自己及獲分配活動</option><option value="admin">管理員 · 全部活動</option></select></div><button id="create-account-button" type="submit" class="small-button account-create">新增帳戶</button></form>
+            <p id="accounts-message" class="message" role="status" aria-live="polite"></p>
+            <section id="account-key-panel" class="account-key-panel" aria-labelledby="account-key-title" hidden><h3 id="account-key-title">新登入密鑰</h3><p>密鑰只會顯示今次。請複製後私下交畀相關人士，並妥善保存。</p><label class="sr-only" for="account-new-key">新登入密鑰</label><input id="account-new-key" type="text" readonly autocomplete="off" autocapitalize="none" spellcheck="false"><div class="account-key-actions"><button id="copy-account-key" type="button" class="small-button">複製密鑰</button><button id="dismiss-account-key" type="button" class="text-button">已保存，隱藏密鑰</button></div><p id="account-key-message" role="status" aria-live="polite"></p></section>
+            <div class="accounts-heading"><h3>團隊帳戶</h3><button id="refresh-accounts" type="button" class="small-button">重新整理帳戶</button></div>
+            <div id="accounts-list" class="accounts-list"></div>
+          </section>
           <div class="admin-grid">
             <section class="card admin-card" aria-labelledby="create-title">
               <div class="section-number">01 / 新活動</div>
               <h2 id="create-title">建立投票 event</h2>
-              <p class="admin-muted">同一條公開 link／QR 可以畀所有人使用。選項建立後唔可以修改。</p>
+              <p class="admin-muted">同一條公開 link／QR 可以畀所有人使用。活動開始前可以修改內容，開始後題目同選項會鎖定。</p>
               <form id="event-form" class="event-form">
                 <label for="event-name">活動名稱</label><input id="event-name" name="name" required maxlength="100" placeholder="例：年度會員大會">
                 <label for="event-question">投票問題</label><textarea id="event-question" name="question" required maxlength="300" rows="3" placeholder="例：你支持邊個方案？"></textarea>
@@ -45,6 +56,7 @@
                 <label class="check-row"><input id="open-now" type="checkbox" checked> 建立後即刻開始</label>
                 <label for="opens-at" id="opens-label" hidden>開始時間 <small>香港時間</small></label><input id="opens-at" type="datetime-local" hidden>
                 <label for="closes-at">截止時間 <small>香港時間</small></label><input id="closes-at" type="datetime-local" required>
+                <label for="results-visibility">公開結果時間</label><select id="results-visibility"><option value="live" selected>即時公開 · 顯示票數及百分比</option><option value="after-close">截止後公開 · 期間只顯示總票數</option></select>
                 <button class="primary-button" type="submit" id="create-button">建立 event <span aria-hidden="true">↗</span></button>
               </form>
               <p id="create-message" class="message" role="status" aria-live="polite"></p>
@@ -54,7 +66,7 @@
             <section class="card admin-card events-card" aria-labelledby="events-title">
               <div class="section-number">02 / 已建立活動</div>
               <h2 id="events-title">分享連結同 QR code</h2>
-              <p class="admin-muted">每個活動都有獨立連結。分享前請先開 link 檢查題目同時間。截止後可下載結果摘要、PDF 報告同逐票 CSV。</p>
+              <p class="admin-muted">每個活動都有獨立連結同結果頁。按設定公開票數，可下載結果摘要及 PDF 報告；逐票 CSV 喺截止後提供。</p>
               <button type="button" id="refresh-events" class="small-button">重新整理活動</button>
               <p id="events-message" class="message" role="status"></p>
               <div id="events-list" class="events-list"><p class="admin-muted">暫時未有活動。</p></div>

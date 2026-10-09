@@ -20,11 +20,13 @@
   "durable_objects": {
     "bindings": [
       { "name": "VOTE_SHARD", "class_name": "VoteShard" },
-      { "name": "EVENT_COORDINATOR", "class_name": "EventCoordinator" }
+      { "name": "EVENT_COORDINATOR", "class_name": "EventCoordinator" },
+      { "name": "ADMIN_DIRECTORY", "class_name": "AdminDirectory" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["VoteShard"] },
-    { "tag": "v2", "new_sqlite_classes": ["EventCoordinator"] }
+    { "tag": "v2", "new_sqlite_classes": ["EventCoordinator"] },
+    { "tag": "v3", "new_sqlite_classes": ["AdminDirectory"] }
   ]
 }

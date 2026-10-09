@@ -46,3 +46,63 @@
 .event-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 17px; padding-top: 14px; border-top: 1px solid #e1e8e9; }
 .small-button:disabled { cursor: default; opacity: .45; }
 .export-progress { font-size: 12px; line-height: 1.6; color: #607581; }
+
+.session-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 11px; }
+.session-identity > strong { color: #284b60; font-size: 13px; }
+.role-badge { display: inline-flex; padding: 5px 8px; border: 1px solid #d0dfe1; border-radius: 6px; color: #54717a; background: #edf3f2; font-size: 11px; }
+.accounts-panel { margin-bottom: 22px; }
+.account-form { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.1fr) auto; gap: 14px; align-items: end; margin: 24px 0 0; }
+.account-form label { display: block; margin-bottom: 8px; color: #243d4e; font-size: 12px; font-weight: 700; }
+.account-form input, .account-form select, .event-form select, .account-role-control select, .event-setting-select { font: inherit; width: 100%; min-height: 43px; border: 1px solid #cbd7db; border-radius: 7px; background: #fbfcfb; color: #243d4e; padding: 10px 12px; }
+.account-form input:focus, .account-form select:focus, .event-form select:focus, .account-role-control select:focus, .event-setting-select:focus { outline: 2px solid #8eacb9; outline-offset: 2px; }
+.account-create { min-height: 43px; padding: 10px 16px; background: #214760; color: #fff; border-color: #214760; font-size: 12px; }
+.account-create:hover { background: #31647e; }
+.accounts-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; border-top: 1px solid #e1e8e9; margin-top: 25px; padding-top: 22px; }
+.accounts-heading h3 { font-size: 15px; margin: 0; }
+.accounts-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; margin-top: 15px; }
+.account-item { padding: 17px; border: 1px solid #d9e2e3; border-radius: 9px; background: #fcfdfc; min-width: 0; }
+.account-item-heading { display: flex; align-items: start; justify-content: space-between; gap: 13px; }
+.account-item h4 { margin: 0 0 5px; font-size: 14px; overflow-wrap: anywhere; }
+.account-id { font-size: 10px; color: #7a8c98; overflow-wrap: anywhere; }
+.account-status { white-space: nowrap; padding: 4px 7px; border-radius: 5px; background: #e7f1eb; color: #376458; font-size: 10px; }
+.account-status.is-disabled { background: #eef0f2; color: #66727b; }
+.account-controls { display: flex; align-items: end; gap: 7px; flex-wrap: wrap; margin-top: 14px; }
+.account-role-control { width: 100%; display: flex; flex-direction: column; gap: 7px; color: #657482; font-size: 11px; }
+.account-role-control select { width: 100%; min-height: 37px; font-size: 12px; padding: 8px 10px; }
+.account-action-status, .event-access-status { font-size: 11px; line-height: 1.65; color: #54717a; margin: 8px 0 0; }
+.account-action-status:empty, .event-access-status:empty { display: none; }
+.account-key-panel { padding: 20px; border: 1px solid #a9c9bd; border-left: 3px solid #628b7e; border-radius: 7px; background: #eff7f2; margin-top: 21px; }
+.account-key-panel h3 { margin: 0 0 8px; font-size: 15px; color: #2b5c50; }
+.account-key-panel p { margin: 7px 0 13px; color: #53766d; font-size: 12px; line-height: 1.7; }
+.account-key-panel input { width: 100%; border: 1px solid #bfd5cd; border-radius: 6px; background: #fff; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #294b40; }
+.account-key-actions { display: flex; align-items: center; gap: 17px; flex-wrap: wrap; margin-top: 13px; }
+.account-key-actions .text-button { font-size: 11px; color: #426f62; }
+#account-key-message:empty { display: none; }
+.event-settings { border-top: 1px solid #e1e8e9; padding-top: 15px; margin-top: 15px; display: grid; grid-template-columns: 1fr auto; column-gap: 10px; align-items: end; }
+.event-settings > label { color: #506c7d; font-size: 11px; display: flex; flex-direction: column; gap: 8px; }
+.event-settings .small-button { min-height: 40px; }
+.event-setting-select { min-height: 40px; font-size: 12px; padding: 9px 11px; }
+.event-setting-help { font-size: 11px; line-height: 1.7; color: #7c8e98; margin: 9px 0 0; }
+.event-settings .event-setting-help, .event-settings .event-access-status { grid-column: 1 / -1; }
+.event-access { margin-top: 17px; border-top: 1px solid #e1e8e9; padding-top: 14px; }
+.event-access > summary { font-size: 12px; font-weight: 700; color: #376a82; cursor: pointer; }
+.event-assignees { padding: 0; margin: 14px 0; border: 0; display: grid; gap: 7px; }
+.event-assignees .check-row { margin: 0; font-size: 12px; }
+.event-assignees input { flex: 0 0 auto; }
+@media (max-width: 900px) { .account-form { grid-template-columns: 1fr 1fr; } .account-create { width: fit-content; } }
+@media (max-width: 610px) { .account-form, .accounts-list { grid-template-columns: 1fr; } .account-create { width: 100%; } .session-identity { gap: 8px; } .session-identity .section-number { width: 100%; } .account-key-panel { padding: 16px; } .accounts-heading { align-items: start; } }
+
+.event-results-mode { display: inline-flex; margin: 0 0 14px; padding: 5px 8px; border-radius: 5px; background: #edf3f4; color: #577685; font-size: 10px; }
+.event-editor { border-top: 1px solid #e1e8e9; padding-top: 15px; margin-top: 16px; }
+.event-editor > summary { cursor: pointer; font-size: 12px; font-weight: 700; color: #376a82; line-height: 1.6; }
+.event-editor-body { padding-top: 10px; }
+.event-editor-section + .event-editor-section { border-top: 1px solid #e1e8e9; padding-top: 18px; margin-top: 20px; }
+.event-editor-section h4 { margin: 5px 0 6px; color: #2d5267; font-size: 13px; }
+.event-editor-form { display: grid; gap: 11px; margin-top: 15px; }
+.event-editor-label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #506c7d; }
+.event-editor-form input, .event-editor-form select, .event-editor-form textarea { width: 100%; min-height: 39px; border: 1px solid #cbd7db; border-radius: 6px; padding: 10px 11px; background: #fff; color: #243d4e; font: inherit; font-size: 12px; line-height: 1.6; }
+.event-editor-form textarea { resize: vertical; }
+.event-editor-form input:focus, .event-editor-form select:focus, .event-editor-form textarea:focus { outline: 2px solid #8eacb9; outline-offset: 2px; }
+.event-editor-form :disabled { background: #f0f3f3; color: #73848d; }
+.event-editor-form .small-button { justify-self: start; margin-top: 2px; min-height: 35px; padding: 9px 12px; }
+.event-editor-form .event-setting-help { margin: -3px 0 2px; font-size: 10px; }

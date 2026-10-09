@@ -1,3 +1,5 @@
+import { applyEventPresentation } from "/presentation.js";
+
 const $ = (id) => document.getElementById(id);
 const elements = Object.fromEntries([
   "phase-label", "poll-id", "close-time", "status-pill", "question-title", "vote-subtitle", "vote-form",
@@ -65,10 +67,19 @@ function renderOptions(options) {
 
 function renderResults(data) {
   const area = elements["result-area"];
-  area.hidden = data.phase !== "closed" || !data.counts;
-  if (area.hidden) return;
+  const hasCounts = data.counts !== null && typeof data.counts === "object" && !Array.isArray(data.counts);
+  area.hidden = false;
+  const title = area.querySelector("h3");
+  if (title) title.textContent = hasCounts ? data.phase === "closed" ? "最終結果" : "即時投票分佈" : "各選項結果";
   const list = elements["result-bars"];
   list.replaceChildren();
+  if (!hasCounts || data.turnout === 0) {
+    const note = document.createElement("p");
+    note.className = "card-subtitle";
+    note.textContent = !hasCounts ? "各選項結果會於截止後公開。" : data.phase === "closed" ? "未有已記錄投票。" : "暫時未有人投票。";
+    list.append(note);
+    if (!hasCounts) return;
+  }
   for (const option of data.options) {
     const count = data.counts[option.id] || 0;
     const percent = data.turnout ? 100 * count / data.turnout : 0;
@@ -78,14 +89,18 @@ function renderResults(data) {
     line.className = "result-line";
     const name = document.createElement("span");
     name.textContent = option.label;
+    name.style.minWidth = "0";
+    name.style.overflowWrap = "anywhere";
     const figure = document.createElement("span");
     figure.textContent = `${count.toLocaleString("zh-HK")} 票 · ${percent.toFixed(1)}%`;
+    figure.style.flexShrink = "0";
     line.append(name, figure);
     const bar = document.createElement("div");
     bar.className = "bar";
+    bar.setAttribute("aria-hidden", "true");
     const fill = document.createElement("div");
     fill.className = "bar-fill";
-    fill.style.width = `${percent}%`;
+    fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
     bar.append(fill);
     item.append(line, bar);
     list.append(item);
@@ -128,12 +143,22 @@ function renderPoll(data) {
   elements["poll-id"].textContent = data.name || data.pollId;
   if (publicEvent) {
     document.title = `${data.name} · WeVote`;
+    $("page-title").textContent = data.name;
+    const introCopy = document.querySelector(".intro-copy");
+    if (introCopy) introCopy.textContent = data.counts !== null ? "選擇你支持嘅選項，確認後即時記錄。活動票數及分佈會定時更新。" : "選擇你支持嘅選項，確認後即時記錄。各選項結果會喺截止後公開。";
     const reportLink = $("event-results-link");
     if (reportLink) { reportLink.href = `/results.html?event=${eventId}`; reportLink.hidden = false; }
   }
+  applyEventPresentation($("event-presentation"), data.presentation, data.name || data.question);
   elements["close-time"].textContent = formatTime(data.closesAt);
   elements["question-title"].textContent = data.question;
   elements.turnout.textContent = data.turnout.toLocaleString("zh-HK");
+  const turnoutNote = document.querySelector(".live-footnote");
+  if (turnoutNote) {
+    if (data.phase === "closed") turnoutNote.textContent = data.turnout === 0 ? "活動已截止，未有已記錄投票。開啟連結或掃碼唔會計票。" : "只計已成功提交嘅投票。正式結果已喺下方公布。";
+    else if (data.phase === "pending") turnoutNote.textContent = "活動未開始。開啟連結或掃碼唔會計票，成功提交投票後先會記錄。";
+    else turnoutNote.textContent = `${data.turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票，唔包括開啟連結或掃碼次數。"}票數約每 10 秒更新，剛提交可能要稍等。`;
+  }
   elements["updated-at"].textContent = new Intl.DateTimeFormat("zh-HK", { timeZone: "Asia/Hong_Kong", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(data.updatedAt));
   const labels = { pending: "等待開始", open: "投票進行中", closed: "投票已結束" };
   elements["phase-label"].textContent = labels[data.phase];
@@ -175,9 +200,12 @@ async function loadPoll() {
   if (pollLoading || (eventId && !publicEvent)) return;
   pollLoading = true;
   try {
-    const response = await fetch(publicEvent ? `${eventApi}/results` : "/api/results");
+    // Keep the shared edge snapshot, but avoid adding a separate browser cache delay.
+    const response = await fetch(publicEvent ? `${eventApi}/results` : "/api/results", { cache: "no-store" });
     if (!response.ok) throw new Error(response.status === 404 ? "搵唔到呢個活動，請檢查主辦方提供嘅連結。" : "目前未能讀取投票資料。");
-    renderPoll(await response.json());
+    const data = await response.json();
+    if (!Number.isSafeInteger(data.turnout) || data.turnout < 0) throw new Error("參與票數未能讀取，稍後會再試。");
+    renderPoll(data);
     if (transientError && !busy && !recorded) { message(""); transientError = false; }
     if (publicEvent && poll.phase !== "closed" && !identityReady) void loadIdentity();
   } catch (error) {
@@ -225,8 +253,10 @@ elements["vote-form"].addEventListener("submit", async (event) => {
     sessionStorage.setItem(recordedKey, "yes");
     elements["vote-form"].hidden = true;
     elements["vote-subtitle"].textContent = "你嘅投票已經記錄。";
-    message(result.duplicate ? "呢張票之前已經記錄，毋須重複提交。" : "投票成功！多謝參與。", "good");
+    message(result.duplicate ? "呢張票之前已經記錄，毋須重複提交。" : "投票成功！多謝參與。參與票數會喺下一輪更新。", "good");
     void loadPoll();
+    // The immediate GET can still return the shared snapshot from before this vote.
+    setTimeout(() => { if (!document.hidden) void loadPoll(); }, 12_000);
   } catch (error) {
     message(error.message || "投票未能送出，請再試。", "bad");
     turnstileToken = null;

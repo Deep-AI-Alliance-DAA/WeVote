@@ -8,10 +8,11 @@
     "deploy": "wrangler deploy --config wrangler.worker.jsonc",
     "build:pages": "node scripts/build-pages.mjs",
     "deploy:pages": "npm run build:pages && wrangler pages deploy pages/dist",
-    "check": "node --check src/worker.js && node --check src/pages-worker.js && node --check public/app.js && node --check public/admin.js && node --check public/home.js && node --check public/results.js && node --check public/share.js && node --check scripts/build-pages.mjs && node --check scripts/issue-tickets.mjs && node --check scripts/export-votes.mjs && node --check scripts/setup-dev.mjs && node --check scripts/smoke-events.mjs",
+    "check": "node --check src/worker.js && node --check src/pages-worker.js && node --check public/app.js && node --check public/admin.js && node --check public/home.js && node --check public/results.js && node --check public/share.js && node --check scripts/build-pages.mjs && node --check scripts/issue-tickets.mjs && node --check scripts/export-votes.mjs && node --check scripts/setup-dev.mjs && node --check scripts/smoke-events.mjs && node --check src/admin-directory.js && node --check public/presentation.js && node --check scripts/smoke-admin.mjs",
     "setup:dev": "node scripts/setup-dev.mjs",
     "tickets": "node scripts/issue-tickets.mjs",
-    "test:smoke": "node scripts/smoke-events.mjs"
+    "test:smoke": "node scripts/smoke-events.mjs",
+    "test:admin": "node scripts/smoke-admin.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.69.0"

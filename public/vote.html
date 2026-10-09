@@ -9,7 +9,7 @@
     <meta name="description" content="簡單、公平、即時嘅大型活動投票系統。">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/style.css">
-    <script src="/app.js" defer></script>
+    <script src="/app.js" type="module"></script>
   </head>
   <body>
     <div class="shell">
@@ -22,8 +22,9 @@
         <section class="intro" aria-labelledby="page-title">
           <div class="intro-text">
             <div class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span id="phase-label">正在連接投票場</span></div>
+            <div id="event-presentation" class="event-presentation" hidden></div>
             <h1 id="page-title">你嘅一票，<br><em>即時被記錄。</em></h1>
-            <p class="intro-copy">一個連結，一次選擇。投票期間即時睇到參與人數；截止後公開結果。</p>
+            <p class="intro-copy">一個連結，一次選擇。票數自動更新，結果按主辦方設定公開。</p>
             <div class="intro-meta"><span>活動編號 <strong id="poll-id">—</strong></span><span>截止時間 <strong id="close-time">—</strong></span></div>
           </div>
           <div class="hero-art" aria-hidden="true"><img src="/assets/ballot-hero.webp" alt=""></div>
@@ -46,13 +47,13 @@
           <aside class="card live-card" aria-labelledby="live-title">
             <div class="card-heading"><span class="step"><svg class="step-icon" viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M4 24V10m7 15V16m7 9V6m7 19v-8m6 8V9" stroke="currentColor" stroke-width="2.7" stroke-linecap="round"/><path d="M2 29c9 2 21 2 30 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>02 / 即時動態</span><span class="signal"><span class="live-dot" aria-hidden="true"></span> LIVE</span></div>
             <h2 id="live-title">參與情況</h2>
-            <div class="turnout"><strong id="turnout">—</strong><span>張有效票</span></div>
+            <div class="turnout"><strong id="turnout">—</strong><span>票已記錄</span></div>
             <div class="divider"></div>
             <div class="detail-row"><span>狀態</span><strong id="phase-detail">—</strong></div>
             <div class="detail-row"><span>距離截止</span><strong id="countdown">—</strong></div>
             <div class="detail-row"><span>資料更新</span><strong id="updated-at">—</strong></div>
             <div id="result-area" class="results" hidden><h3>最終結果</h3><div id="result-bars"></div></div>
-            <p class="live-footnote">票數約每 10 秒更新一次。正式結果喺投票截止後顯示。</p>
+            <p class="live-footnote">票數約每 10 秒更新一次；活動截止後先係最終結果。</p>
             <a id="event-results-link" class="admin-link" href="/results.html" hidden>開啟結果頁 ↗</a>
           </aside>
         </div>

@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+export { AdminDirectory } from "./admin-directory.js";
 
 const SHARDS = 128;
 const MAX_OPTIONS = 20;
@@ -56,8 +57,8 @@ function resultsCacheControl(config, state, updatedAt) {
 }
 
 const eventPattern = /^[a-f0-9]{24}$/;
-// Configurations are immutable. A bounded per-isolate cache keeps vote requests
-// off the event coordinator after their first lookup. Never cache unknown IDs.
+// Ballots lock when voting opens. Cache only opened/closed configurations;
+// scheduled events stay editable and unknown IDs are never cached.
 const eventConfigs = new Map();
 
 function coordinator(env, id) {
@@ -79,7 +80,7 @@ async function eventConfig(env, id) {
   eventConfigs.set(id, lookup);
   try {
     const config = await lookup;
-    if (!config) eventConfigs.delete(id);
+    if (!config || phase(config) === "pending") eventConfigs.delete(id);
     return config;
   } catch (error) {
     eventConfigs.delete(id);
@@ -264,7 +265,9 @@ async function eventResults(request, env, id) {
     closesAt: config.closesAt,
     phase: state,
     turnout: tally.turnout,
-    counts: state === "closed" ? tally.counts : null,
+    resultsVisibility: tally.resultsVisibility,
+    presentation: tally.presentation,
+    counts: state === "closed" || (state === "open" && tally.resultsVisibility === "live") ? tally.counts : null,
     turnstileSiteKey: env.TURNSTILE_SITE_KEY,
     updatedAt: tally.updatedAt,
   }, 200, resultsCacheControl(config, state, tally.updatedAt));
@@ -303,19 +306,25 @@ async function eventVote(request, env, id) {
   const response = await shard(env, id, voter.shard).fetch("https://shard.internal/vote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ voterHash: voter.voterHash, optionId: body.optionId, createdAt: Date.now(), closesAt: timestamp(config.closesAt) }),
+    body: JSON.stringify({ eventId: id, ballotVersion: config.ballotVersion || "legacy", voterHash: voter.voterHash, optionId: body.optionId, createdAt: Date.now(), closesAt: timestamp(config.closesAt) }),
   });
   const result = await response.json();
   return json(result, response.status);
 }
 
 async function adminEvents(request, env) {
-  const provided = request.headers.get("Authorization")?.replace(/^Bearer /, "");
-  if (!await sameSecret(provided, env.ADMIN_DASHBOARD_KEY)) return json({ error: "管理密鑰無效。" }, 401);
+  const principal = await requireAdmin(request, env);
   if (request.method === "GET") {
     const list = await env.EVENTS.list({ prefix: "event:", limit: 1000 });
-    const events = list.keys.map((key) => key.metadata).filter(Boolean).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return json({ events, hasMore: !list.list_complete, publicBaseUrl: env.PUBLIC_BASE_URL || new URL(request.url).origin });
+    const permitted = principal.role === "organizer" ? new Set(await directory(env).permittedEvents(principal.id)) : null;
+    const events = list.keys.map((key) => key.metadata).filter(Boolean)
+      .filter((event) => !permitted || event.ownerId === principal.id || permitted.has(event.id))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (principal.role === "owner") {
+      const grants = await directory(env).eventAssignments(events.map((event) => event.id));
+      for (const event of events) event.assigneeIds = grants[event.id] || [];
+    }
+    return json({ events, principal, hasMore: !list.list_complete, publicBaseUrl: env.PUBLIC_BASE_URL || new URL(request.url).origin });
   }
   if (request.method !== "POST") return json({ error: "方法無效。" }, 405);
   const origin = request.headers.get("Origin");
@@ -325,16 +334,19 @@ async function adminEvents(request, env) {
   const name = typeof input?.name === "string" ? input.name.trim() : "";
   const question = typeof input?.question === "string" ? input.question.trim() : "";
   const labels = input?.options;
+  const resultsVisibility = input?.resultsVisibility || "after-close";
+  const presentation = validatePresentation(input?.presentation || {});
   const opensAt = Date.parse(input?.opensAt || "");
   const closesAt = Date.parse(input?.closesAt || "");
   if (!name || name.length > 100 || !question || question.length > 300 ||
+      !["live", "after-close"].includes(resultsVisibility) ||
       !Array.isArray(labels) || labels.length < 2 || labels.length > MAX_OPTIONS ||
       labels.some((label) => typeof label !== "string" || !label.trim() || label.trim().length > 100) ||
       !Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= Math.max(opensAt, Date.now()) ||
       closesAt - opensAt > 90 * 86400_000) return json({ error: "請檢查活動名稱、題目、選項同時間。" }, 400);
   const id = randomHex(12);
   const event = {
-    id, name, question,
+    id, name, question, ownerId: principal.id, ballotVersion: randomHex(8), resultsVisibility, presentation,
     options: labels.map((label, index) => ({ id: `o${index + 1}`, label: label.trim() })),
     opensAt: new Date(opensAt).toISOString(),
     closesAt: new Date(closesAt).toISOString(),
@@ -382,6 +394,149 @@ async function sameSecret(provided, expected) {
   return diff === 0;
 }
 
+function directory(env) { return env.ADMIN_DIRECTORY.getByName("global"); }
+
+function adminCookieName(request) {
+  return new URL(request.url).protocol === "https:" ? "__Host-wv_admin" : "wv_admin";
+}
+
+function adminCookie(request, token, seconds = 8 * 3600) {
+  return `${adminCookieName(request)}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${seconds}${new URL(request.url).protocol === "https:" ? "; Secure" : ""}`;
+}
+
+function checkAdminOrigin(request) {
+  if (["GET", "HEAD"].includes(request.method)) return;
+  const origin = request.headers.get("Origin");
+  if ((origin && origin !== new URL(request.url).origin) || request.headers.get("Sec-Fetch-Site") === "cross-site" ||
+      (!origin && cookieValue(request, adminCookieName(request)) && !request.headers.has("Authorization"))) {
+    throw new RequestError("來源不符。", 403);
+  }
+}
+
+async function principalForKey(key, env) {
+  if (typeof key !== "string" || key.length < 32 || key.length > 256) return null;
+  if (await sameSecret(key, env.ADMIN_DASHBOARD_KEY)) return { id: "root", name: "系統擁有人", role: "owner", disabled: false, createdAt: null };
+  return directory(env).authenticate(key);
+}
+
+async function requireAdmin(request, env, ownerOnly = false) {
+  const bearer = request.headers.get("Authorization")?.match(/^Bearer (.+)$/)?.[1];
+  const principal = bearer ? await principalForKey(bearer, env) : await directory(env).session(cookieValue(request, adminCookieName(request)));
+  if (!principal) throw new RequestError("登入已失效，請重新輸入管理員密鑰。", 401);
+  if (ownerOnly && principal.role !== "owner") throw new RequestError("只有系統擁有人可以管理帳戶及指派活動。", 403);
+  return principal;
+}
+
+async function requireEventAccess(env, principal, config) {
+  if (principal.role !== "organizer" || config.ownerId === principal.id) return;
+  if (!await directory(env).hasEventAccess(principal.id, config.id)) throw new RequestError("你冇權限管理呢個活動。", 403);
+}
+
+function requireJson(request) {
+  if (!request.headers.get("Content-Type")?.startsWith("application/json")) throw new RequestError("請提交 JSON。", 415);
+}
+
+function validatePresentation(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new RequestError("版面設定無效。", 400);
+  const theme = input.theme || "ink";
+  const organizer = input.organizer ?? "";
+  const description = input.description ?? "";
+  const logoUrl = input.logoUrl ?? "";
+  if (!["ink", "ocean", "forest", "terracotta"].includes(theme) ||
+      typeof organizer !== "string" || organizer.length > 100 || typeof description !== "string" || description.length > 1000 ||
+      typeof logoUrl !== "string" || logoUrl.length > 2048) throw new RequestError("版面設定無效。", 400);
+  if (logoUrl) {
+    try { const url = new URL(logoUrl); if (url.protocol !== "https:" || url.username || url.password) throw new Error(); }
+    catch { throw new RequestError("Logo 請填有效嘅 HTTPS 圖片網址。", 400); }
+  }
+  return { theme, organizer: organizer.trim(), description: description.trim(), logoUrl: logoUrl.trim() };
+}
+
+async function adminAuth(request, env, action) {
+  if (action === "me") {
+    if (request.method !== "GET") return json({ error: "方法無效。" }, 405);
+    return json({ principal: await requireAdmin(request, env) });
+  }
+  if (request.method !== "POST") return json({ error: "方法無效。" }, 405);
+  requireJson(request);
+  if (action === "logout") {
+    await directory(env).logout(cookieValue(request, adminCookieName(request)));
+    const response = json({ ok: true });
+    response.headers.set("Set-Cookie", adminCookie(request, "", 0));
+    return response;
+  }
+  const input = await readJson(request);
+  const ip = request.headers.get("CF-Connecting-IP") || "local";
+  const ipHash = await hmac(env.VOTE_SIGNING_KEY, ip);
+  if (!await directory(env).allowLogin(ipHash)) return json({ error: "登入嘗試太多，請 15 分鐘後再試。" }, 429);
+  const principal = await principalForKey(input?.key, env);
+  if (!principal) return json({ error: "管理員密鑰無效。" }, 401);
+  const token = await directory(env).createSession(principal);
+  const response = json({ principal });
+  response.headers.set("Set-Cookie", adminCookie(request, token));
+  return response;
+}
+
+async function adminAccounts(request, env, id, rotate = false) {
+  await requireAdmin(request, env, true);
+  const object = directory(env);
+  if (!id && request.method === "GET") return json({ accounts: await object.listAccounts() });
+  requireJson(request);
+  const input = await readJson(request);
+  if ((!id && request.method !== "POST") || (id && request.method !== (rotate ? "POST" : "PATCH"))) return json({ error: "方法無效。" }, 405);
+  // Only validated control-plane operations reach the private directory.
+  if (!id && (typeof input?.name !== "string" || !input.name.trim() || input.name.trim().length > 80 || !["admin", "organizer"].includes(input.role))) return json({ error: "帳戶名稱或權限無效。" }, 400);
+  if (id && !rotate && (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["name", "role", "disabled"].includes(key)) ||
+      (input.role !== undefined && !["admin", "organizer"].includes(input.role)) || (input.disabled !== undefined && typeof input.disabled !== "boolean") ||
+      (input.name !== undefined && (typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 80)))) return json({ error: "帳戶設定無效。" }, 400);
+  if (!id) {
+    if ((await object.listAccounts()).length >= 100) return json({ error: "帳戶數量已達 100 個上限。" }, 400);
+    return json(await object.createAccount(input), 201);
+  }
+  const result = rotate ? await object.rotateKey(id) : await object.updateAccount(id, input);
+  if (!result) return json({ error: "搵唔到帳戶。" }, 404);
+  return json(rotate ? result : { account: result });
+}
+
+async function adminEventDetail(request, env, id, action = "content") {
+  const principal = await requireAdmin(request, env, action === "access");
+  await eventConfig(env, id);
+  const config = await coordinator(env, id).getConfig();
+  if (!config) return json({ error: "搵唔到呢個活動。" }, 404);
+  await requireEventAccess(env, principal, config);
+  const object = coordinator(env, id);
+  if (action === "content" && request.method === "GET") return json({ event: config, ...await object.displaySettings() });
+  if (request.method !== (action === "access" ? "PUT" : "PATCH")) return json({ error: "方法無效。" }, 405);
+  requireJson(request);
+  const input = await readJson(request);
+  if (action === "access") {
+    const ids = input?.accountIds;
+    if (!Array.isArray(ids) || ids.length > 100 || ids.some((value) => typeof value !== "string" || !eventPattern.test(value))) return json({ error: "指派帳戶無效。" }, 400);
+    const accounts = await directory(env).listAccounts();
+    if (ids.some((value) => !accounts.some((account) => account.id === value && !account.disabled && account.role === "organizer"))) return json({ error: "只可以指派啟用中嘅活動管理員。" }, 400);
+    await directory(env).grantEvent(id, ids);
+    return json({ ok: true, accountIds: ids });
+  }
+  if (action === "settings") {
+    if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["resultsVisibility", "presentation"].includes(key)) ||
+        (input.resultsVisibility !== undefined && !["live", "after-close"].includes(input.resultsVisibility))) return json({ error: "活動設定無效。" }, 400);
+    const update = {};
+    if (input.resultsVisibility !== undefined) update.resultsVisibility = input.resultsVisibility;
+    if (input.presentation !== undefined) update.presentation = validatePresentation(input.presentation);
+    const settings = await object.updateDisplaySettings(update);
+    await object.publishCatalog();
+    return json(settings);
+  }
+  const { name, question, options } = input || {};
+  if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || typeof question !== "string" || !question.trim() || question.trim().length > 300 ||
+      !Array.isArray(options) || options.length < 2 || options.length > MAX_OPTIONS || options.some((label) => typeof label !== "string" || !label.trim() || label.trim().length > 100)) return json({ error: "請檢查活動名稱、題目同 2–20 個選項。" }, 400);
+  const event = await object.updateBallot({ name: name.trim(), question: question.trim(), options: options.map((label, index) => ({ id: `o${index + 1}`, label: label.trim() })), ballotVersion: randomHex(8) });
+  if (!event) return json({ error: "活動已開始，題目同選項已鎖定；可以複製內容開新活動。" }, 409);
+  eventConfigs.delete(id);
+  await object.publishCatalog();
+  return json({ event });
+}
+
 async function exportShard(request, env) {
   const authorized = await sameSecret(request.headers.get("Authorization")?.replace(/^Bearer /, ""), env.ADMIN_EXPORT_KEY);
   if (!authorized) return json({ error: "未獲授權。" }, 401);
@@ -391,9 +546,10 @@ async function exportShard(request, env) {
 }
 
 async function exportEventShard(request, env, id) {
-  if (!await sameSecret(request.headers.get("Authorization")?.replace(/^Bearer /, ""), env.ADMIN_DASHBOARD_KEY)) return json({ error: "管理密鑰無效。" }, 401);
+  const principal = await requireAdmin(request, env);
   const config = await eventConfig(env, id);
   if (!config) return json({ error: "搵唔到呢個活動。" }, 404);
+  await requireEventAccess(env, principal, config);
   if (phase(config) !== "closed") return json({ error: "投票結束後先可以匯出。" }, 403);
   return exportPollShard(request, env, id);
 }
@@ -413,7 +569,15 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      if (url.pathname.startsWith("/api/admin/")) checkAdminOrigin(request);
+      const authRoute = /^\/api\/admin\/(login|logout|me)$/.exec(url.pathname);
+      if (authRoute) return await adminAuth(request, env, authRoute[1]);
+      if (url.pathname === "/api/admin/accounts") return await adminAccounts(request, env);
+      const accountRoute = /^\/api\/admin\/accounts\/([a-f0-9]{24})(\/rotate)?$/.exec(url.pathname);
+      if (accountRoute) return await adminAccounts(request, env, accountRoute[1], Boolean(accountRoute[2]));
       if (url.pathname === "/api/admin/events") return await adminEvents(request, env);
+      const adminEventRoute = /^\/api\/admin\/events\/([a-f0-9]{24})(?:\/(access|settings))?$/.exec(url.pathname);
+      if (adminEventRoute) return await adminEventDetail(request, env, adminEventRoute[1], adminEventRoute[2] || "content");
       const eventExport = /^\/api\/admin\/events\/([a-f0-9]{24})\/export$/.exec(url.pathname);
       if (eventExport) return request.method === "GET" ? await exportEventShard(request, env, eventExport[1]) : json({ error: "方法無效。" }, 405);
       const eventRoute = /^\/api\/events\/([a-f0-9]{24})\/(results|identity|vote)$/.exec(url.pathname);
@@ -444,6 +608,7 @@ export class EventCoordinator extends DurableObject {
     this.refreshPromise = null;
     ctx.blockConcurrencyWhile(async () => {
       this.sql.exec("CREATE TABLE IF NOT EXISTS event_config (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), config_json TEXT NOT NULL)");
+      this.sql.exec("CREATE TABLE IF NOT EXISTS event_display (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), settings_json TEXT NOT NULL)");
     });
   }
 
@@ -464,8 +629,9 @@ export class EventCoordinator extends DurableObject {
     const config = this.getConfig();
     if (!config) return false;
     const { id, name, opensAt, closesAt, createdAt } = config;
+    const { resultsVisibility } = this.displaySettings();
     try {
-      await this.env.EVENTS.put(`event:${id}`, JSON.stringify(config), { metadata: { id, name, opensAt, closesAt, createdAt } });
+      await this.env.EVENTS.put(`event:${id}`, JSON.stringify(config), { metadata: { id, name, opensAt, closesAt, createdAt, ownerId: config.ownerId || "root", resultsVisibility } });
     } catch {
       console.error(JSON.stringify({ event: "event_catalog_retry", eventId: id }));
       await this.ctx.storage.setAlarm(Date.now() + 60_000);
@@ -479,13 +645,39 @@ export class EventCoordinator extends DurableObject {
     await this.publishCatalog();
   }
 
+  displaySettings() {
+    const row = this.sql.exec("SELECT settings_json FROM event_display WHERE singleton = 1").toArray()[0];
+    if (row) return JSON.parse(row.settings_json);
+    const config = this.getConfig();
+    return { resultsVisibility: config?.resultsVisibility || "after-close", presentation: config?.presentation || { theme: "ink", organizer: "", description: "", logoUrl: "" } };
+  }
+
+  async updateDisplaySettings(update) {
+    const settings = { ...this.displaySettings(), ...update };
+    this.sql.exec("INSERT INTO event_display (singleton, settings_json) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET settings_json = excluded.settings_json", JSON.stringify(settings));
+    await this.ctx.storage.setAlarm(Date.now() + 5000);
+    await this.ctx.storage.sync();
+    return settings;
+  }
+
+  async updateBallot(update) {
+    const config = this.getConfig();
+    if (!config || phase(config) !== "pending") return null;
+    const event = { ...config, ...update };
+    this.sql.exec("UPDATE event_config SET config_json = ? WHERE singleton = 1", JSON.stringify(event));
+    this.snapshotValue = null;
+    await this.ctx.storage.setAlarm(Date.now() + 5000);
+    await this.ctx.storage.sync();
+    return event;
+  }
+
   async snapshot() {
     const config = this.getConfig();
     if (!config) throw new Error("Event configuration unavailable.");
     while (true) {
       const state = phase(config);
       if (this.snapshotValue?.phase === state && Date.now() - this.snapshotValue.refreshedAt < 10_000) {
-        return this.snapshotValue;
+        return { ...this.snapshotValue, ...this.displaySettings() };
       }
       // Every edge location reaches this same event object. Concurrent cache
       // misses share one aggregation rather than each reading all vote shards.
@@ -499,7 +691,7 @@ export class EventCoordinator extends DurableObject {
       const snapshot = await this.refreshPromise;
       // A scan started before closing may have read early shards too soon.
       // Scan again once when the opening/closing boundary changed during it.
-      if (snapshot.phase === phase(config)) return snapshot;
+      if (snapshot.phase === phase(config)) return { ...snapshot, ...this.displaySettings() };
     }
   }
 }
@@ -510,6 +702,7 @@ export class VoteShard extends DurableObject {
     this.sql = ctx.storage.sql;
     this.sql.exec("CREATE TABLE IF NOT EXISTS votes (voter_hash TEXT PRIMARY KEY, option_id TEXT NOT NULL, created_at INTEGER NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS counts (option_id TEXT PRIMARY KEY, total INTEGER NOT NULL)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS ballot (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version TEXT NOT NULL, options_json TEXT NOT NULL)");
   }
 
   async fetch(request) {
@@ -518,6 +711,20 @@ export class VoteShard extends DurableObject {
       const data = await request.json();
       if (!/^[a-f0-9]{64}$/.test(data?.voterHash || "") || !/^[a-zA-Z0-9_-]{1,32}$/.test(data?.optionId || "") || !Number.isSafeInteger(data?.createdAt)) return json({ error: "資料無效。" }, 400);
       if (data.closesAt !== undefined && (!Number.isFinite(data.closesAt) || Date.now() >= data.closesAt)) return json({ error: "投票已截止。" }, 403);
+      if (data.eventId) {
+        if (!eventPattern.test(data.eventId)) return json({ error: "活動無效。" }, 400);
+        let ballot = this.sql.exec("SELECT version, options_json FROM ballot WHERE singleton = 1").toArray()[0];
+        if (!ballot) {
+          // A shard pins the authoritative ballot after opening. A request
+          // holding a pre-edit config cannot record a vote against old labels.
+          const config = await coordinator(this.env, data.eventId).getConfig();
+          if (!config || phase(config) !== "open") return json({ error: "投票目前未開放。" }, 403);
+          this.sql.exec("INSERT OR IGNORE INTO ballot (singleton, version, options_json) VALUES (1, ?, ?)", config.ballotVersion || "legacy", JSON.stringify(config.options.map((option) => option.id)));
+          ballot = this.sql.exec("SELECT version, options_json FROM ballot WHERE singleton = 1").one();
+        }
+        if (ballot.version !== data.ballotVersion || !JSON.parse(ballot.options_json).includes(data.optionId)) return json({ error: "投票內容已更新，請重新整理後再投票。" }, 409);
+        if (Date.now() >= data.closesAt) return json({ error: "投票已截止。" }, 403);
+      }
       const inserted = this.ctx.storage.transactionSync(() => {
         const write = this.sql.exec("INSERT OR IGNORE INTO votes (voter_hash, option_id, created_at) VALUES (?, ?, ?)", data.voterHash, data.optionId, data.createdAt);
         if (write.rowsWritten === 0) return false;

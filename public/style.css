@@ -82,3 +82,28 @@ footer a:hover { text-decoration: underline; }
 
 .option span, .result-line span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .result-line span:last-child { flex-shrink: 0; }
+
+/* Event themes use a fixed palette. No event can supply CSS values. */
+body[data-theme="ink"] { --event-accent: #356f88; --event-strong: #214760; --event-soft: #edf4f5; --event-page: #f6f7f5; --event-border: #cddde2; }
+body[data-theme="ocean"] { --event-accent: #146b96; --event-strong: #14567b; --event-soft: #eaf3f8; --event-page: #f2f7fa; --event-border: #c7dde8; }
+body[data-theme="forest"] { --event-accent: #39765a; --event-strong: #2e5f49; --event-soft: #eaf3ec; --event-page: #f3f7f2; --event-border: #cbded0; }
+body[data-theme="terracotta"] { --event-accent: #a05a40; --event-strong: #86452f; --event-soft: #faf0e9; --event-page: #faf6f2; --event-border: #e7d3c8; }
+body[data-theme] { background: var(--event-page); }
+body[data-theme] .brand-mark, body[data-theme] .eyebrow { color: var(--event-strong); border-color: var(--event-border); background: var(--event-soft); }
+body[data-theme] .live-card, body[data-theme] .report-turnout, body[data-theme] .report-empty { background: var(--event-soft); }
+body[data-theme] .step, body[data-theme] h1 em, body[data-theme] .result-line span:last-child, body[data-theme] .results-table td:last-child { color: var(--event-accent); }
+body[data-theme] .primary-button, body[data-theme] .report-button-primary { background: var(--event-strong); border-color: var(--event-strong); }
+body[data-theme] .primary-button:not(:disabled):hover, body[data-theme] .report-button-primary:not(:disabled):hover { background: var(--event-accent); }
+body[data-theme] .bar-fill { background: var(--event-accent); }
+body[data-theme] .bar { background: var(--event-border); }
+body[data-theme] .option:has(input:checked) { background: var(--event-soft); border-color: var(--event-accent); box-shadow: 0 0 0 2px var(--event-border); }
+body[data-theme] .option input:checked { border-color: var(--event-accent); }
+.event-presentation { display: flex; align-items: start; gap: 18px; margin: 22px 0 15px; }
+.event-presentation[hidden], .event-presentation-logo[hidden] { display: none; }
+.event-presentation-logo { width: 72px; height: 72px; max-width: 72px; max-height: 72px; object-fit: contain; flex: 0 0 72px; padding: 6px; border: 1px solid var(--event-border, #cddde2); background: #fff; border-radius: 10px; }
+.event-presentation-copy { min-width: 0; }
+.event-organizer-label { margin: 0 0 4px; color: #758792; font-size: 10px; font-weight: 700; letter-spacing: .06em; }
+.event-organizer { margin: 0; color: var(--event-strong, #214760); font-size: 15px; font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
+.event-description { max-width: 720px; margin: 8px 0 0; color: #5e7380; font-size: 13px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.intro h1 { overflow-wrap: anywhere; }
+@media (max-width: 610px) { .event-presentation { gap: 12px; } .event-presentation-logo { width: 56px; height: 56px; flex-basis: 56px; } }

@@ -9,15 +9,27 @@
 | 頁面 | 用途 |
 | --- | --- |
 | `/` | 主頁、活動連結／編號輸入、管理員入口 |
-| `/admin.html` | 用管理密鑰登入、開活動、分享、截止後匯出逐票 CSV |
+| `/admin.html` | 獨立帳戶登入、分配權限／活動、編輯、分享、截止後匯出逐票 CSV |
 | `/vote.html?event=<id>` | 每個活動獨立投票頁，2–20 個選項及自動開始／截止 |
-| `/results.html?event=<id>` | 參與人數、截止後嘅選項票數／百分比、摘要 CSV、列印／另存 PDF |
+| `/results.html?event=<id>` | 即時票數 Dashboard、長條圖／百分比、摘要 CSV、列印／另存 PDF、全屏展示 |
 
-- 管理員設定活動名稱、題目、選項同香港時間；活動建立後嘅設定固定。
+- 管理員設定活動名稱、題目、選項同香港時間；未開始可編輯內容，開始後鎖定題目／選項。Logo HTTPS 圖片網址、四款色調、主辦方及介紹可以隨時更新。
 - 每個活動產生獨立連結及 QR code，可複製連結、下載／分享 QR 圖，或開啟 WhatsApp、Facebook、X 分享。
 - Instagram 用下載 QR 圖再上載 Story／貼文；Story 可自行加入活動連結貼紙。
-- 公開結果喺進行期間只顯示總票數，截止後公開各選項票數；投票頁約每 11 秒讀取資料，後端另有短時間快取。
+- 每個活動可選即時公開各選項結果，或截止後先公開；投票頁及 Dashboard 約每 11 秒更新，後端共享快取約 10 秒，因此唔係逐票即刻顯示。結果頁可全屏展示；未截止報告會標示即時結果。
 - 舊 `/?event=<id>` 同 `/#ticket=<token>` 連結會自動轉到投票頁。
+
+## 管理員帳戶同權限
+
+系統擁有人用原有 `ADMIN_DASHBOARD_KEY` 登入，可新增最多 100 個命名帳戶：
+
+- **全站管理員（admin）**：管理全部活動。
+- **活動管理員（organizer）**：只管理自己建立或擁有人指派嘅活動。
+- **系統擁有人（owner）**：管理全部活動、開帳戶、改權限、停用帳戶、更新密鑰及分配活動。
+
+每個帳戶用獨立隨機 256-bit 登入密鑰，建立／更換時只顯示一次，需私下派發；伺服器只保存 hash。密鑰唔係人手設定密碼，冇公開註冊或電郵發送。登入後以 HttpOnly、Secure、SameSite=Strict cookie 維持八小時；管理密鑰唔再存喺 sessionStorage。停用／更換密鑰會立即撤銷帳戶 session；登出會撤銷當前 session。帳戶及活動權限由伺服器檢查，唔靠前端隱藏。主密鑰屬系統擁有人，請勿分發畀其他管理員。
+
+未開始活動可以改名稱、題目同選項，分享連結維持不變；開始後鎖定。分區會固定開始後嘅權威投票版本，拒絕持有舊選項設定嘅請求。切換公開結果模式可短暫受快取影響；曾公開嘅資料唔能夠收回。
 
 ## 公開連結同防重複限制
 
@@ -32,7 +44,8 @@
 ```text
 Cloudflare Pages：靜態主頁／管理頁／投票頁／結果頁
   /api/* → Service Binding → 私有 wevote-api Worker（無公開 workers.dev）
-    ├─ EventCoordinator：每個活動嘅權威設定、合併並發結果讀取
+    ├─ AdminDirectory：帳戶、session、角色及活動分配（只處理管理流量）
+    ├─ EventCoordinator：每個活動嘅權威內容／外觀、合併並發結果讀取
     ├─ 128 個 VoteShard／活動：SQLite Durable Objects，儲存選票及計數
     └─ EVENTS KV：管理員活動目錄（最終一致，可短暫延遲）
 ```
@@ -60,13 +73,13 @@ npm run build:pages
 npx wrangler pages dev pages/dist
 ```
 
-如要喺 Pages 本地埠號測分享，請相應更新 `PUBLIC_BASE_URL`。檢查程式：`npm run check`。本地 API 流程檢查：`npm run test:smoke -- http://localhost:8787`，只准本地執行，會建立測試活動。`.dev.vars`、`.env*`、`tickets*.csv` 已忽略；唔好提交密鑰、選票匯出或票據。
+如要喺 Pages 本地埠號測分享，請相應更新 `PUBLIC_BASE_URL`。檢查程式：`npm run check`。本地 API 流程檢查：`npm run test:smoke -- http://localhost:8787`，只准本地執行，會建立測試活動。帳戶／權限本地檢查：`npm run test:admin -- http://localhost:8787`。`.dev.vars`、`.env*`、`tickets*.csv` 已忽略；唔好提交密鑰、選票匯出或票據。
 
 ## 部署到自己 Cloudflare 帳戶
 
 1. `npx wrangler login`，確認使用自己有權管理嘅帳戶。
 2. `npx wrangler kv namespace create EVENTS --config wrangler.worker.jsonc`，將返回嘅 namespace ID 寫入 `wrangler.worker.jsonc`；**唔好沿用本 repo 帳戶嘅 ID**。
-3. 按自己專案更改 Worker `name`、Pages `name` 及 Pages Service Binding 嘅 `service`，三者要對應。將 Worker `vars.PUBLIC_BASE_URL` 改成自己正式網址。保留 `VOTE_SHARD`、`EVENT_COORDINATOR` binding、class name 同既有 migration 歷史。
+3. 按自己專案更改 Worker `name`、Pages `name` 及 Pages Service Binding 嘅 `service`，三者要對應。將 Worker `vars.PUBLIC_BASE_URL` 改成自己正式網址。保留 `VOTE_SHARD`、`EVENT_COORDINATOR`、`ADMIN_DIRECTORY` binding、class name 同既有 migration 歷史。
 4. 建立正式 Turnstile widget，加入所有實際使用嘅 hostname，例如正式網域及自己嘅 `*.pages.dev` hostname。
 5. 用下列形式逐項上傳 Worker secrets；正式環境唔可以使用測試 Turnstile 鑰匙：
 
@@ -81,7 +94,7 @@ npx wrangler secret put ADMIN_DASHBOARD_KEY --config wrangler.worker.jsonc
 7. 喺 Pages Custom domains 加投票子網域。DNS 由原供應商管理時，揀 **My DNS provider**，加 `vote` CNAME 指向自己嘅 `<project-name>.pages.dev`。本項目係 `vote.daa.hk → wevote.pages.dev`，**毋須轉 daa.hk nameserver**。[官方設定方法](https://developers.cloudflare.com/pages/configuration/custom-domains/)
 8. 等待網域／TLS Active，核對首頁、管理登入、活動 link、QR、Turnstile、截止結果及匯出，再做正式活動突發流量測試。
 
-管理密鑰只喺瀏覽器分頁暫存；用完請登出。分享出去嘅連結同 QR 只包含公開活動 ID，唔包含管理密鑰。
+登入 session 最長八小時；用完請登出。分享出去嘅連結同 QR 只包含公開活動 ID，唔包含管理密鑰。
 
 ## 可選：舊式獨立票據
 
@@ -111,7 +124,7 @@ Durable Objects 另有請求、執行時間、SQLite 讀寫及儲存用量；KV 
 
 ## 資料同授權
 
-應用層儲存瀏覽器／票據 ID 嘅 hash、選項同時間；公開結果只顯示總票數。管理員逐票 CSV 包含 hash 同時間，仍須限制存取及保存期。正式密鑰放 Cloudflare Secrets；HTTPS 同每個 hostname 嘅 cookie 各自獨立，所以正式派一個統一網域嘅連結。
+應用層儲存瀏覽器／票據 ID 嘅 hash、選項同時間；公開結果按活動設定顯示總票數及選項彙總，唔會公開逐票識別。管理員逐票 CSV 包含 hash 同時間，仍須限制存取及保存期。正式密鑰放 Cloudflare Secrets；HTTPS 同每個 hostname 嘅 cookie 各自獨立，所以正式派一個統一網域嘅連結。
 
 Credits: **[DAA.HK](https://daa.hk/), Hillman Tam and Keith Li**。
 

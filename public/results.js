@@ -1,8 +1,10 @@
+import { applyEventPresentation } from "/presentation.js";
+
 const reportElements = Object.fromEntries([
   "event-title", "event-question", "load-message", "report-content", "report-phase", "report-turnout",
   "report-visibility", "report-opens", "report-closes", "report-updated", "waiting-results", "waiting-title",
   "waiting-copy", "final-results", "results-rows", "result-total", "export-note", "report-id", "vote-link",
-  "csv-button", "print-button",
+  "csv-button", "print-button", "refresh-button", "results-title", "results-empty", "fullscreen-button", "report-dashboard", "event-presentation",
 ].map((id) => [id, document.getElementById(id)]));
 
 const reportEventId = new URLSearchParams(location.search).get("event");
@@ -22,7 +24,11 @@ function reportCount(value) {
 }
 
 function canExportReport() {
-  return currentReport?.phase === "closed" && currentReport.counts !== null && typeof currentReport.counts === "object";
+  return ["open", "closed"].includes(currentReport?.phase) && hasReportCounts(currentReport);
+}
+
+function hasReportCounts(report) {
+  return report?.counts !== null && typeof report?.counts === "object" && !Array.isArray(report.counts);
 }
 
 function setReportMessage(text, error = false) {
@@ -32,30 +38,38 @@ function setReportMessage(text, error = false) {
 
 function renderReport(data) {
   currentReport = data;
-  const closed = canExportReport();
+  const closed = data.phase === "closed";
+  const canExport = canExportReport();
+  const hasCounts = hasReportCounts(data);
   const turnout = reportCount(data.turnout);
   const phase = reportLabels[data.phase] || "讀取活動資料中";
-  document.title = `${data.name} · 活動結果 · WeVote`;
+  document.title = `${data.name} · ${closed ? "最終結果" : "即時結果（未截止）"} · WeVote`;
   reportElements["event-title"].textContent = data.name;
   reportElements["event-question"].textContent = data.question;
+  applyEventPresentation(reportElements["event-presentation"], data.presentation, data.name);
   reportElements["report-phase"].textContent = phase;
   reportElements["report-turnout"].textContent = turnout.toLocaleString("zh-HK");
-  reportElements["report-visibility"].textContent = closed ? "投票已截止，以下顯示各選項嘅已記錄票數。" : "各選項票數會喺投票截止後公開。";
+  reportElements["report-visibility"].textContent = closed
+    ? turnout === 0 ? "活動已截止，未有已記錄投票。" : "投票已截止，以下顯示各選項嘅已記錄票數。"
+    : `${turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票。"}開啟連結或掃碼唔會計票。票數約每 10 秒更新${hasCounts ? "。" : "，各選項結果會於截止後公開。"}`;
   reportElements["report-opens"].textContent = formatReportTime(data.opensAt);
   reportElements["report-closes"].textContent = formatReportTime(data.closesAt);
   reportElements["report-updated"].textContent = formatReportTime(data.updatedAt);
   reportElements["report-id"].textContent = reportEventId;
   reportElements["report-content"].hidden = false;
-  reportElements["waiting-results"].hidden = closed;
-  reportElements["final-results"].hidden = !closed;
-  reportElements["csv-button"].disabled = !closed;
-  reportElements["print-button"].disabled = !closed;
-  reportElements["export-note"].textContent = closed ? "下載完整票數摘要，或使用瀏覽器列印功能另存 PDF。" : "截止後可下載 CSV，或列印及另存 PDF。";
+  reportElements["waiting-results"].hidden = hasCounts;
+  reportElements["final-results"].hidden = !hasCounts;
+  reportElements["csv-button"].disabled = !canExport;
+  reportElements["print-button"].disabled = !canExport;
+  reportElements["export-note"].textContent = canExport ? closed ? "下載完整票數摘要，或使用瀏覽器列印功能另存 PDF。" : "可保存目前票數摘要。活動仍在進行，報告會標示「未截止」及資料更新時間。" : "各選項結果公開後可下載 CSV，或列印及另存 PDF。";
   reportElements["waiting-title"].textContent = data.phase === "closed" ? "結果整理中" : "投票截止後公布結果";
   reportElements["waiting-copy"].textContent = data.phase === "closed" ? "活動已截止，正在讀取最終結果。請稍候。" : "活動進行期間只顯示參與人數。各選項票數及百分比會喺截止後公開。";
 
-  if (closed) {
+  if (hasCounts) {
+    reportElements["results-title"].textContent = closed ? "最終投票分佈" : "即時結果（未截止）";
     reportElements["result-total"].textContent = `共 ${turnout.toLocaleString("zh-HK")} 票`;
+    reportElements["results-empty"].hidden = turnout !== 0;
+    reportElements["results-empty"].textContent = data.phase === "closed" ? "活動已截止，未有已記錄投票。" : "暫時未有人投票。";
     const rows = data.options.map((option) => {
       const count = reportCount(data.counts[option.id]);
       const percent = turnout > 0 ? count / turnout * 100 : 0;
@@ -87,13 +101,15 @@ function renderReport(data) {
 async function loadReport() {
   if (!validReportEvent || reportLoading) return;
   reportLoading = true;
+  reportElements["refresh-button"].disabled = true;
+  reportElements["refresh-button"].textContent = "更新中…";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25_000);
   try {
-    const response = await fetch(`/api/events/${reportEventId}/results`, { signal: controller.signal });
+    const response = await fetch(`/api/events/${reportEventId}/results`, { signal: controller.signal, cache: "no-store" });
     if (!response.ok) throw new Error(response.status === 404 ? "搵唔到呢個活動，請檢查主辦方提供嘅連結。" : "暫時未能讀取活動結果，稍後會再試。");
     const data = await response.json();
-    if (!Array.isArray(data.options) || typeof data.name !== "string" || typeof data.question !== "string") throw new Error("活動資料未完整，請稍後再試。");
+    if (!Array.isArray(data.options) || typeof data.name !== "string" || typeof data.question !== "string" || !Number.isSafeInteger(data.turnout) || data.turnout < 0) throw new Error("活動資料未完整，請稍後再試。");
     renderReport(data);
   } catch (error) {
     if (!currentReport) reportElements["event-title"].textContent = "未能載入活動";
@@ -101,6 +117,8 @@ async function loadReport() {
   } finally {
     clearTimeout(timeout);
     reportLoading = false;
+    reportElements["refresh-button"].disabled = false;
+    reportElements["refresh-button"].textContent = "更新票數";
   }
 }
 
@@ -116,10 +134,11 @@ reportElements["csv-button"].addEventListener("click", () => {
   const report = currentReport;
   const turnout = reportCount(report.turnout);
   const rows = [
-    ["WeVote 活動結果"], ["活動名稱", report.name], ["活動編號", reportEventId], ["投票題目", report.question],
+    [report.phase === "closed" ? "WeVote 活動最終結果" : "WeVote 即時結果（未截止）"], ["活動名稱", report.name], ["活動編號", reportEventId], ["投票題目", report.question],
+    ["主辦單位", report.presentation?.organizer || ""], ["活動介紹", report.presentation?.description || ""],
     ["開始時間（香港）", formatReportTime(report.opensAt)], ["截止時間（香港）", formatReportTime(report.closesAt)],
     ["資料更新（香港）", formatReportTime(report.updatedAt)], ["匯出時間（香港）", formatReportTime(Date.now())],
-    ["狀態", reportLabels[report.phase]], ["已記錄票數", turnout], [], ["選項", "票數", "百分比"],
+    ["狀態", report.phase === "closed" ? reportLabels[report.phase] : `${reportLabels[report.phase]}（未截止）`], ["已記錄票數", turnout], [], ["選項", "票數", "百分比"],
     ...report.options.map((option) => {
       const count = reportCount(report.counts[option.id]);
       return [option.label, count, `${(turnout > 0 ? count / turnout * 100 : 0).toFixed(1)}%`];
@@ -139,6 +158,24 @@ reportElements["csv-button"].addEventListener("click", () => {
 
 reportElements["print-button"].addEventListener("click", () => {
   if (canExportReport()) window.print();
+});
+reportElements["refresh-button"].addEventListener("click", () => { void loadReport(); });
+
+const dashboard = reportElements["report-dashboard"];
+const fullscreenButton = reportElements["fullscreen-button"];
+fullscreenButton.hidden = typeof dashboard.requestFullscreen !== "function";
+fullscreenButton.addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement === dashboard) await document.exitFullscreen();
+    else await dashboard.requestFullscreen();
+  } catch {
+    setReportMessage("瀏覽器未能開啟全屏展示；可以使用瀏覽器嘅全屏功能。", true);
+  }
+});
+document.addEventListener("fullscreenchange", () => {
+  const active = document.fullscreenElement === dashboard;
+  fullscreenButton.textContent = active ? "離開全屏" : "全屏展示";
+  fullscreenButton.setAttribute("aria-pressed", String(active));
 });
 
 if (validReportEvent) {
