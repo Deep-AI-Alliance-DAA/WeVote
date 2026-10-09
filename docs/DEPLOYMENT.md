@@ -149,13 +149,13 @@ Changing the canonical hostname also requires updating provider return URLs. Exi
 1. Open the public homepage and `/admin`, and sign in with your owner key.
 2. Create a disposable event, publish it, and verify its start/end times.
 3. Open its public link on another browser; verify Turnstile and submit one vote.
-4. Confirm results and charts update on the 3-second refresh cycle when result visibility permits it.
+4. Confirm results and charts request updates approximately every second while voting is open and result visibility permits it.
 5. Check the QR destination, CSV summary and print/PDF report.
 6. Wait until the disposable event's scheduled closing time, then verify voting stops and authorized raw CSV export works.
 7. Create organizer accounts and explicitly assign their events. Test their access before distributing keys.
 8. If public signup is enabled, test a provider login and one draft on staging: the draft uses the account's event allowance, a second creation is denied, and a period longer than 24 hours is denied. Use the isolated trial tests for the 10,000-vote boundary rather than filling a real event.
 
-Results use a shared snapshot of approximately two seconds plus client polling and network delay. A successful vote need not appear on every dashboard instantly. Public results follow the event's visibility setting.
+The voting page and dashboard poll approximately every second while voting is open. Results use a shared snapshot of approximately one second; cache expiry, request duration, and network delay can still delay a successful vote's appearance. Public results follow the event's visibility setting.
 
 ## Local Pages preview
 

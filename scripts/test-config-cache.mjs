@@ -77,10 +77,10 @@ const maxAge = (config, state, updatedAt) => {
 
 // Cache lifetimes include the shared snapshot's age and upcoming phase boundary.
 const sampledAt = now;
-assert.equal(maxAge(activeBallot, "open"), 2);
-assert.equal(maxAge(activeBallot, "open", new Date(sampledAt).toISOString()), 2);
-assert.equal(maxAge(activeBallot, "open", new Date(sampledAt + 1000).toISOString()), 2);
-assert.equal(maxAge({ ...activeBallot, opensAt: now + 5000 }, "pending"), 2);
+assert.equal(maxAge(activeBallot, "open"), 1);
+assert.equal(maxAge(activeBallot, "open", new Date(sampledAt).toISOString()), 1);
+assert.equal(maxAge(activeBallot, "open", new Date(sampledAt + 1000).toISOString()), 1);
+assert.equal(maxAge({ ...activeBallot, opensAt: now + 5000 }, "pending"), 1);
 now = sampledAt + 1250;
 assert.equal(maxAge(activeBallot, "open", new Date(sampledAt).toISOString()), 1);
 assert.equal(maxAge({ ...activeBallot, closesAt: now + 500 }, "open"), 1);
@@ -96,7 +96,7 @@ const snapshotObject = (config, fetchShard) => ({
 });
 const snapshot = (object) => EventCoordinator.prototype.snapshot.call(object);
 
-// Concurrent readers share one 128-shard aggregation, reused until 2s expiry.
+// Concurrent readers share one 128-shard aggregation, reused until 1s expiry.
 let releaseShards;
 const shardGate = new Promise((resolve) => { releaseShards = resolve; });
 let shardReads = 0;
@@ -115,12 +115,12 @@ for (const tally of tallies) {
   assert.equal(tally.counts.o1, 128);
 }
 const refreshedAt = shared.snapshotValue.refreshedAt;
-now = refreshedAt + 1999;
+now = refreshedAt + 999;
 await snapshot(shared);
-assert.equal(shardReads, 128, "A snapshot younger than 2s must be reused.");
-now = refreshedAt + 2000;
+assert.equal(shardReads, 128, "A snapshot younger than 1s must be reused.");
+now = refreshedAt + 1000;
 await snapshot(shared);
-assert.equal(shardReads, 256, "A snapshot must refresh at 2s expiry.");
+assert.equal(shardReads, 256, "A snapshot must refresh at 1s expiry.");
 
 // Draft and pending ballots have no votes and must never wake vote shards.
 for (const [lifecycle, opensAt, expectedPhase] of [

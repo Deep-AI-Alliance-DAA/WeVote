@@ -5,7 +5,7 @@ export { AdminDirectory } from "./admin-directory.js";
 
 const SHARDS = 128;
 const MAX_OPTIONS = 20;
-const RESULT_SNAPSHOT_MS = 2000;
+const RESULT_SNAPSHOT_MS = 1000;
 const TRIAL = Object.freeze({ eventLimit: 1, voteLimit: 10_000, maxDurationHours: 24 });
 const encoder = new TextEncoder();
 

@@ -29,7 +29,7 @@
 - Logo、活動封面海報嘅 HTTPS 圖片網址、四款色調、主辦方及介紹可以隨時更新。
 - 每個活動產生獨立連結及 QR code，可複製連結、下載／分享 QR 圖，或開啟 WhatsApp、Facebook、X 分享。
 - Instagram 用下載 QR 圖再上載 Story／貼文；Story 可自行加入活動連結貼紙。
-- 每個活動可選即時公開各選項結果，或截止後先公開；投票頁及 Dashboard 約每 3 秒自動刷新，後端共享快取約 2 秒，新票數可能有數秒延遲。結果頁可全屏展示；未截止報告會標示即時結果。
+- 每個活動可選即時公開各選項結果，或截止後先公開；開放投票期間，投票頁及 Dashboard 約每 1 秒自動刷新，後端共享結果快照約 1 秒。快取到期、請求時間及網絡都可能令新票數延遲出現，唔保證即時同步。結果頁可全屏展示；未截止報告會標示即時結果。
 - 舊 `/?event=<id>` 同 `/#ticket=<token>` 連結會自動轉到投票頁。
 
 ## 管理員帳戶同權限
@@ -165,13 +165,13 @@ npm run tickets -- --count 5 --url http://localhost:8787/vote.html \
 
 Workers／Pages Functions Free 每日共用 10 萬次動態請求，唔適合 5 萬人持續讀取即時結果。Workers Paid **最低 US$5／月**，包含每月 1,000 萬次請求及 3,000 萬 CPU milliseconds；超額用量另計。[Workers 定價](https://developers.cloudflare.com/workers/platform/pricing/)
 
-Durable Objects 另有請求、執行時間、SQLite 讀寫及儲存用量；KV 亦有各自配額。**US$5 唔係固定總成本保證**，要計埋活動長度、更新頻率、重試、冷啟動、監控、測試同帳戶其他專案用量。[Durable Objects 定價](https://developers.cloudflare.com/durable-objects/platform/pricing/) · [KV 定價](https://developers.cloudflare.com/kv/platform/pricing/)
+Durable Objects 另有請求、執行時間、SQLite 讀寫及儲存用量；KV 亦有各自配額，呢啲額度同帳戶其他專案共用。**US$5 唔係固定總成本保證**，要計埋活動長度、更新頻率、重試、冷啟動、監控、測試同帳戶其他專案用量。[Durable Objects 定價](https://developers.cloudflare.com/durable-objects/platform/pricing/) · [KV 定價](https://developers.cloudflare.com/kv/platform/pricing/)
 
-Durable Objects Free 另外有**每日 10 萬次請求**上限，整個帳戶共用。原有／職員活動嘅完整票數彙總可以讀晒 128 個 vote shards；公開試用就直接讀 Coordinator 計數，減少分區 fan-out。不過登記、識別、收票、結果讀取、SQL 寫入及匯出都仍有平台用量。持續每三秒更新可能用盡免費額度；持續即時投票建議用 Workers Paid。額度用盡時投票／管理 API 可以回傳 503，要等相應額度重置或升級帳戶。[Durable Objects 定價](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+Durable Objects Free 另外有**每日 10 萬次請求**上限，整個帳戶共用。原有／職員活動嘅完整票數彙總可以讀晒 128 個 vote shards；公開試用就直接讀 Coordinator 計數，減少分區 fan-out。不過登記、識別、收票、結果讀取、SQL 寫入及匯出都仍有平台用量。持續每秒更新可能用盡免費額度；持續即時投票建議用 Workers Paid。額度用盡時投票／管理 API 可以回傳 503，要等相應額度重置或升級帳戶。[Durable Objects 定價](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 
-例：5 萬人留喺頁面 10 分鐘、每 3 秒讀一次，大約有 1,000 萬次結果請求，另加識別、收票及其他請求。相比每 11 秒刷新，結果查詢次數約為 3.7 倍。快取減少後端彙總，唔會消除所有入口請求費用。
+例：5 萬人留喺頁面 10 分鐘、每 1 秒讀一次，大約有 3,000 萬次結果請求，另加識別、收票及其他請求。相比每 11 秒刷新，結果查詢次數約為 11 倍。快取減少後端彙總，唔會消除所有入口請求費用。
 
-**未完成 5 萬人同時投票嘅正式壓力測試。** 活動前要測突發進入／提交成功率、重票處理、p95 延遲、冷啟動同結果更新延遲；同時核對 Free／Paid 配額。分區數目唔係容量證明。
+**未完成 5 萬人同時投票嘅正式壓力測試。** 試用 10,000 票上限係儲存限制，唔代表已驗證 10,000 人同時投票。活動前要測突發進入／提交成功率、重票處理、p95 延遲、冷啟動同結果更新延遲；同時核對 Free／Paid 配額。分區數目唔係容量證明。
 
 ## 資料同授權
 

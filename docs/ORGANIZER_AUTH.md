@@ -15,7 +15,7 @@ Publication, closing, logout, and repeat sign-in preserve the creation reservati
 
 Trial votes, counts, and the global cap are stored in the event's EventCoordinator. Its synchronous SQLite transaction checks duplicates, checks the cap, and records the vote/counters atomically; success waits for storage confirmation. Trial results read local counters. Staff/key-created events continue using the existing 128-shard ballot path. The export API still provides 128 partitions and 500-row cursor pages.
 
-The cap bounds stored votes. A single coordinator's capacity for 10,000 simultaneous voters has not been established by a burst test. Platform requests, SQL operations, storage, and verification traffic still have costs and quotas. Payments, subscriptions, and Stripe integration are not implemented.
+The cap bounds stored votes. A single coordinator's capacity for 10,000 simultaneous voters has not been established by a burst test. While voting is open, public pages poll approximately every second and share a backend snapshot for approximately one second; caching and network delay can still delay visible updates. Platform requests, SQL operations, storage, and verification traffic still have costs and account-wide quotas. Payments, subscriptions, and Stripe integration are not implemented.
 
 ## Canonical HTTPS hostname
 

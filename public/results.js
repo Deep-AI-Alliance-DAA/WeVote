@@ -53,7 +53,7 @@ function renderReport(data) {
   reportElements["report-turnout"].textContent = turnout.toLocaleString("zh-HK");
   reportElements["report-visibility"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。以下內容只供預覽。" : pending ? pendingCopy : closed
     ? turnout === 0 ? "活動已截止，未有已記錄投票。" : "投票已截止，以下顯示各選項嘅已記錄票數。"
-    : `${turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票。"}開啟連結或掃碼唔會計票。每 3 秒自動更新票數${hasCounts ? "。" : "，各選項結果會於截止後公開。"}`;
+    : `${turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票。"}開啟連結或掃碼唔會計票。每 1 秒自動更新票數${hasCounts ? "。" : "，各選項結果會於截止後公開。"}`;
   reportElements["report-opens"].textContent = formatReportTime(data.opensAt);
   reportElements["report-closes"].textContent = formatReportTime(data.closesAt);
   reportElements["report-updated"].textContent = formatReportTime(data.updatedAt);
@@ -186,7 +186,7 @@ if (validReportEvent) {
   void loadReport();
   setInterval(() => {
     if (!document.hidden && (!currentReport || currentReport.phase !== "closed" || !canExportReport())) void loadReport();
-  }, 3_000);
+  }, 1_000);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) void loadReport();
   });
