@@ -23,6 +23,7 @@ WeVote takes inspiration from Keith Li's emphasis on shared caching and reducing
 - Independent events with 2–20 options, drafts, preview, publication, and scheduled opening/closing.
 - Owner, administrator, and organizer roles; individual login keys and event assignments.
 - Optional public organizer registration through Google or Apple, with a bounded trial event.
+- A first-use admin guide for login, event setup, sharing, and reports; skip it or reopen it with “使用導覽”.
 - Event content editing before voting begins; organizer text, HTTPS logo/cover images, and four color themes.
 - A link and QR code for each event, downloadable QR artwork, and sharing tools for WhatsApp, Facebook, X, and Instagram workflows.
 - Live results or results revealed after closing, charts, percentages, and fullscreen display.

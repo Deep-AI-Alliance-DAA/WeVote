@@ -9,15 +9,16 @@
     <title>WeVote — 活動管理</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="/admin.css">
+    <link rel="stylesheet" href="/admin.css?v=20261009-onboarding">
     <link rel="stylesheet" href="/share.css">
-    <script type="module" src="/admin.js"></script>
+    <link rel="stylesheet" href="/onboarding.css?v=20261009-onboarding">
+    <script type="module" src="/admin.js?v=20261009-onboarding"></script>
   </head>
   <body>
     <div class="shell admin-shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="WeVote 主頁"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M7 20.5 15.5 29 33 10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 30c9 6 22 7 32-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span>WeVote</span></a>
-        <span class="top-note"><span class="top-dot" aria-hidden="true"></span> 活動管理</span>
+        <div class="admin-top-tools"><span class="top-note"><span class="top-dot" aria-hidden="true"></span> 活動管理</span><button id="onboarding-help" class="guide-button" type="button" aria-label="開啟使用導覽" disabled><span aria-hidden="true">?</span> 使用導覽</button></div>
       </header>
 
       <main>

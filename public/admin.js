@@ -1,4 +1,5 @@
 import { mountEventShare } from "./share.js";
+import { createOnboarding } from "./onboarding.js?v=20261009-onboarding";
 
 const $ = (id) => document.getElementById(id);
 const roleLabels = { owner: "擁有人", admin: "管理員 · 全部活動", organizer: "活動管理員" };
@@ -17,6 +18,48 @@ let creationQuota = null;
 let creationBusy = false;
 let pendingCreation = null;
 const pendingCreationKey = "wevote-pending-event";
+let onboardingReady = false;
+const onboarding = createOnboarding({ getSteps: onboardingSteps, storagePrefix: "wevote-guide:v1:" });
+
+function onboardingContext() {
+  if (!principal) return "login";
+  if (creationQuota?.limit !== 1) return "dashboard-unlimited";
+  return "dashboard-trial";
+}
+
+function showOnboarding(automatic = false) {
+  if (!onboardingReady || onboarding.isOpen()) return;
+  onboarding.start({ key: onboardingContext(), automatic });
+}
+
+function onboardingSteps() {
+  if (!principal) return [{
+    target: $("login-title"),
+    title: "先登入，開一場投票。",
+    body: "主辦方用可用嘅登入方式或管理員密鑰登入，就可以管理活動。參加者只需要活動連結或 QR code，毋須登入。",
+  }];
+  const limited = creationQuota?.limit === 1;
+  const used = limited && creationQuota.used === 1;
+  const unavailable = !creationQuota;
+  const firstEvent = $("events-list").querySelector(".event-item");
+  const steps = [];
+  if (used || unavailable) {
+    steps.push({ target: $("creation-quota"), title: used ? "繼續管理已有活動。" : "先確認活動配額。", body: used
+      ? "免費活動額度已使用。你仍然可以編輯、發佈、分享同查看已有活動；儲存草稿亦計入一個活動嘅配額。"
+      : "暫時未能確認活動配額，請重新整理或稍後再試。導覽唔會建立活動，亦唔會更改你已填嘅內容。" });
+  } else if (pendingCreation) {
+    steps.push({ target: $("retry-create-button"), title: "先確認上次建立結果。", body: "上次提交未確認完成。請用「重試建立同一活動」核對結果，系統會沿用已儲存嘅內容，避免重複建立。" });
+  } else {
+    steps.push({ target: $("event-name"), title: "寫低題目同選項。", body: limited
+      ? "免費試用可建立一個活動，最多 10,000 張有效投票，投票期間最長 24 小時。先準備活動名稱、問題同 2–20 個選項；草稿亦會使用活動額度。"
+      : "填活動名稱、投票問題同 2–20 個選項。團隊管理帳戶可以建立多個活動，每場都會有自己嘅連結。" });
+    steps.push({ target: $("closes-at"), title: "設定時間同結果公開方式。", body: "開始／截止時間用香港時間。可以先儲存草稿核對內容，再發佈；結果可即時公開，或截止後先公開。導覽只作介紹，唔會幫你提交活動。" });
+  }
+  steps.push({ target: firstEvent?.querySelector(".event-share") || $("events-title"), title: "分享同一條連結或 QR code。", body: "建立後，呢度會列出你可管理嘅活動。可以複製連結、下載 QR 圖，或開啟社交分享；Instagram 可用下載嘅 QR 圖發佈 Story。草稿連結只供預覽，發佈後先接受投票。" });
+  steps.push({ target: firstEvent?.querySelector(".event-tools") || $("events-title"), title: "睇即時結果，帶走報告。", body: "每場活動嘅「結果／CSV／PDF 報告」會開啟 dashboard；投票期間約每 1 秒查詢更新，公開內容跟活動設定。可下載票數摘要或列印報告，逐票 CSV 喺截止後提供。" });
+  if (principal.role === "owner") steps.push({ target: $("accounts-title"), title: "分配畀團隊一齊管理。", body: "擁有人可新增團隊帳戶、設定權限，再喺活動內分配管理員。個人管理密鑰要私下交畀相關人士；唔好放喺公開投票連結。" });
+  return steps;
+}
 
 function note(id, value, kind = "") {
   const element = $(id);
@@ -50,6 +93,7 @@ function clearAccountKey() {
 }
 
 function clearSession() {
+  onboarding.dismiss();
   sessionVersion++;
   pendingRequests.forEach((controller) => controller.abort());
   pendingRequests.clear();
@@ -570,6 +614,7 @@ async function loadEvents() {
     note("create-message", "你嘅免費活動已喺下方列出，可以繼續管理。", "good");
   }
   note("events-message", data.hasMore ? "活動數量較多，目前只顯示部分活動。" : "");
+  showOnboarding(true);
 }
 
 function setPrincipal(value, quota) {
@@ -688,6 +733,7 @@ async function openDashboard(value, quota) {
     try { await loadEvents(); }
     catch (error) { if (!cancelled(error)) note("events-message", error.message, "bad"); }
   }
+  showOnboarding(true);
 }
 
 function setLoginBusy(value) {
@@ -964,5 +1010,9 @@ async function bootstrap() {
 
 resetEventTimes();
 const authCallback = readAuthCallback();
-void loadAuthProviders();
-void bootstrap();
+$("onboarding-help").addEventListener("click", () => showOnboarding());
+void Promise.allSettled([loadAuthProviders(), bootstrap()]).then(() => {
+  onboardingReady = true;
+  $("onboarding-help").disabled = false;
+  showOnboarding(true);
+});

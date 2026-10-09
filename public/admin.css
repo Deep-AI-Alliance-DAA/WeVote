@@ -1,4 +1,11 @@
 .admin-shell { max-width: 1220px; }
+.admin-top-tools { display: flex; align-items: center; gap: 20px; }
+.guide-button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #c4d3d9; border-radius: 7px 9px 6px 8px; padding: 8px 11px; background: #fff; color: #376a82; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
+.guide-button > span { display: inline-grid; place-items: center; width: 17px; height: 17px; border: 1px solid currentColor; border-radius: 50%; font-size: 11px; }
+.guide-button:hover { background: #edf5f8; }
+.guide-button:focus-visible { outline: 2px solid #376a82; outline-offset: 3px; }
+.guide-button:disabled { opacity: .55; cursor: wait; }
+@media (max-width: 610px) { .admin-top-tools { gap: 10px; } .admin-top-tools .top-note { display: none; } }
 [hidden] { display: none !important; }
 .admin-intro { padding: 58px 0 46px; max-width: 750px; }
 .kicker, .section-number { color: #376a82; font-size: 11px; font-weight: 800; letter-spacing: .12em; }
