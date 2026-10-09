@@ -43,6 +43,7 @@ function timestamp(value) {
 }
 
 function phase(config, now = Date.now()) {
+  if (config.lifecycle === "draft") return "draft";
   if (now < timestamp(config.opensAt)) return "pending";
   if (now >= timestamp(config.closesAt)) return "closed";
   return "open";
@@ -57,8 +58,7 @@ function resultsCacheControl(config, state, updatedAt) {
 }
 
 const eventPattern = /^[a-f0-9]{24}$/;
-// Ballots lock when voting opens. Cache only opened/closed configurations;
-// scheduled events stay editable and unknown IDs are never cached.
+// Ballots lock when voting opens. Drafts and scheduled events stay editable.
 const eventConfigs = new Map();
 
 function coordinator(env, id) {
@@ -68,19 +68,29 @@ function coordinator(env, id) {
 async function eventConfig(env, id) {
   if (!eventPattern.test(id)) return null;
   if (eventConfigs.has(id)) return eventConfigs.get(id);
+  let cacheable = false;
   const lookup = (async () => {
     const object = coordinator(env, id);
-    const authoritative = await object.getConfig();
-    if (authoritative) return authoritative;
+    let authoritative = await object.configState();
+    if (authoritative.config) {
+      cacheable = authoritative.cacheable;
+      return authoritative.config;
+    }
     // Bootstrap older KV events. New links read durable config immediately.
     const legacy = await env.EVENTS.get(`event:${id}`, "json");
-    return legacy ? object.initialize(legacy) : null;
+    if (!legacy) return null;
+    await object.initialize(legacy);
+    authoritative = await object.configState();
+    cacheable = authoritative.cacheable;
+    return authoritative.config;
   })();
   if (eventConfigs.size >= 256) eventConfigs.delete(eventConfigs.keys().next().value);
   eventConfigs.set(id, lookup);
   try {
     const config = await lookup;
-    if (!config || phase(config) === "pending") eventConfigs.delete(id);
+    // Sample editability with the same durable read, before the RPC response
+    // crosses the opening boundary. A pre-edit config must never stick forever.
+    if (!config || !cacheable) eventConfigs.delete(id);
     return config;
   } catch (error) {
     eventConfigs.delete(id);
@@ -277,6 +287,7 @@ async function eventResults(request, env, id) {
 async function eventIdentity(request, env, id) {
   const config = await eventConfig(env, id);
   if (!config) return json({ error: "搵唔到呢個活動。" }, 404);
+  if (phase(config) === "draft") return json({ error: "活動仲係草稿，未開放投票。" }, 403);
   if (phase(config) === "closed") return json({ error: "投票已截止。" }, 403);
   if (await voterFromCookie(request, config, env.VOTE_SIGNING_KEY)) return json({ ready: true });
   const randomId = randomHex();
@@ -339,18 +350,19 @@ async function adminEvents(request, env) {
   const question = typeof input?.question === "string" ? input.question.trim() : "";
   const labels = input?.options;
   const resultsVisibility = input?.resultsVisibility || "after-close";
+  const lifecycle = input?.lifecycle ?? "published";
   const presentation = validatePresentation(input?.presentation || {});
   const opensAt = Date.parse(input?.opensAt || "");
   const closesAt = Date.parse(input?.closesAt || "");
   if (!name || name.length > 100 || !question || question.length > 300 ||
-      !["live", "after-close"].includes(resultsVisibility) ||
+      !["live", "after-close"].includes(resultsVisibility) || !["draft", "published"].includes(lifecycle) ||
       !Array.isArray(labels) || labels.length < 2 || labels.length > MAX_OPTIONS ||
       labels.some((label) => typeof label !== "string" || !label.trim() || label.trim().length > 100) ||
       !Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= Math.max(opensAt, Date.now()) ||
       closesAt - opensAt > 90 * 86400_000) return json({ error: "請檢查活動名稱、題目、選項同時間。" }, 400);
   const id = randomHex(12);
   const event = {
-    id, name, question, ownerId: principal.id, ballotVersion: randomHex(8), resultsVisibility, presentation,
+    id, name, question, ownerId: principal.id, ballotVersion: randomHex(8), lifecycle, resultsVisibility, presentation,
     options: labels.map((label, index) => ({ id: `o${index + 1}`, label: label.trim() })),
     opensAt: new Date(opensAt).toISOString(),
     closesAt: new Date(closesAt).toISOString(),
@@ -446,14 +458,16 @@ function validatePresentation(input) {
   const organizer = input.organizer ?? "";
   const description = input.description ?? "";
   const logoUrl = input.logoUrl ?? "";
+  const coverUrl = input.coverUrl ?? "";
   if (!["ink", "ocean", "forest", "terracotta"].includes(theme) ||
       typeof organizer !== "string" || organizer.length > 100 || typeof description !== "string" || description.length > 1000 ||
-      typeof logoUrl !== "string" || logoUrl.length > 2048) throw new RequestError("版面設定無效。", 400);
-  if (logoUrl) {
-    try { const url = new URL(logoUrl); if (url.protocol !== "https:" || url.username || url.password) throw new Error(); }
-    catch { throw new RequestError("Logo 請填有效嘅 HTTPS 圖片網址。", 400); }
+      typeof logoUrl !== "string" || logoUrl.length > 2048 || typeof coverUrl !== "string" || coverUrl.length > 2048) throw new RequestError("版面設定無效。", 400);
+  for (const [label, value] of [["Logo", logoUrl], ["封面", coverUrl]]) {
+    if (!value) continue;
+    try { const url = new URL(value); if (url.protocol !== "https:" || url.username || url.password) throw new Error(); }
+    catch { throw new RequestError(`${label}請填有效嘅 HTTPS 圖片網址。`, 400); }
   }
-  return { theme, organizer: organizer.trim(), description: description.trim(), logoUrl: logoUrl.trim() };
+  return { theme, organizer: organizer.trim(), description: description.trim(), logoUrl: logoUrl.trim(), coverUrl: coverUrl.trim() };
 }
 
 async function adminAuth(request, env, action) {
@@ -510,9 +524,16 @@ async function adminEventDetail(request, env, id, action = "content") {
   await requireEventAccess(env, principal, config);
   const object = coordinator(env, id);
   if (action === "content" && request.method === "GET") return json({ event: config, ...await object.displaySettings() });
-  if (request.method !== (action === "access" ? "PUT" : "PATCH")) return json({ error: "方法無效。" }, 405);
+  if (request.method !== (action === "access" ? "PUT" : action === "publish" ? "POST" : "PATCH")) return json({ error: "方法無效。" }, 405);
   requireJson(request);
   const input = await readJson(request);
+  if (action === "publish") {
+    const event = await object.publish();
+    if (!event) return json({ error: "只可以發佈未過期嘅草稿；請先檢查投票時間。" }, 409);
+    eventConfigs.delete(id);
+    const catalogPending = !await object.publishCatalog();
+    return json({ event, catalogPending });
+  }
   if (action === "access") {
     const ids = input?.accountIds;
     if (!Array.isArray(ids) || ids.length > 100 || ids.some((value) => typeof value !== "string" || !eventPattern.test(value))) return json({ error: "指派帳戶無效。" }, 400);
@@ -534,7 +555,16 @@ async function adminEventDetail(request, env, id, action = "content") {
   const { name, question, options } = input || {};
   if (typeof name !== "string" || !name.trim() || name.trim().length > 100 || typeof question !== "string" || !question.trim() || question.trim().length > 300 ||
       !Array.isArray(options) || options.length < 2 || options.length > MAX_OPTIONS || options.some((label) => typeof label !== "string" || !label.trim() || label.trim().length > 100)) return json({ error: "請檢查活動名稱、題目同 2–20 個選項。" }, 400);
-  const event = await object.updateBallot({ name: name.trim(), question: question.trim(), options: options.map((label, index) => ({ id: `o${index + 1}`, label: label.trim() })), ballotVersion: randomHex(8) });
+  const update = { name: name.trim(), question: question.trim(), options: options.map((label, index) => ({ id: `o${index + 1}`, label: label.trim() })), ballotVersion: randomHex(8) };
+  if (input.opensAt !== undefined || input.closesAt !== undefined) {
+    if (phase(config) !== "draft") return json({ error: "只有草稿可以更改投票時間。" }, 409);
+    const opensAt = Date.parse(input.opensAt ?? config.opensAt);
+    const closesAt = Date.parse(input.closesAt ?? config.closesAt);
+    if (!Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= Math.max(opensAt, Date.now()) || closesAt - opensAt > 90 * 86400_000) return json({ error: "請檢查投票開始及結束時間。" }, 400);
+    update.opensAt = new Date(opensAt).toISOString();
+    update.closesAt = new Date(closesAt).toISOString();
+  }
+  const event = await object.updateBallot(update);
   if (!event) return json({ error: "活動已開始，題目同選項已鎖定；可以複製內容開新活動。" }, 409);
   eventConfigs.delete(id);
   await object.publishCatalog();
@@ -580,7 +610,7 @@ export default {
       const accountRoute = /^\/api\/admin\/accounts\/([a-f0-9]{24})(\/rotate)?$/.exec(url.pathname);
       if (accountRoute) return await adminAccounts(request, env, accountRoute[1], Boolean(accountRoute[2]));
       if (url.pathname === "/api/admin/events") return await adminEvents(request, env);
-      const adminEventRoute = /^\/api\/admin\/events\/([a-f0-9]{24})(?:\/(access|settings))?$/.exec(url.pathname);
+      const adminEventRoute = /^\/api\/admin\/events\/([a-f0-9]{24})(?:\/(access|settings|publish))?$/.exec(url.pathname);
       if (adminEventRoute) return await adminEventDetail(request, env, adminEventRoute[1], adminEventRoute[2] || "content");
       const eventExport = /^\/api\/admin\/events\/([a-f0-9]{24})\/export$/.exec(url.pathname);
       if (eventExport) return request.method === "GET" ? await exportEventShard(request, env, eventExport[1]) : json({ error: "方法無效。" }, 405);
@@ -621,6 +651,11 @@ export class EventCoordinator extends DurableObject {
     return row ? JSON.parse(row.config_json) : null;
   }
 
+  configState() {
+    const config = this.getConfig();
+    return { config, cacheable: Boolean(config && ["open", "closed"].includes(phase(config))) };
+  }
+
   async initialize(config) {
     const inserted = this.sql.exec("INSERT OR IGNORE INTO event_config (singleton, config_json) VALUES (1, ?)", JSON.stringify(config));
     // Persist the retry before returning. A request interrupted after creation
@@ -635,7 +670,7 @@ export class EventCoordinator extends DurableObject {
     const { id, name, opensAt, closesAt, createdAt } = config;
     const { resultsVisibility } = this.displaySettings();
     try {
-      await this.env.EVENTS.put(`event:${id}`, JSON.stringify(config), { metadata: { id, name, opensAt, closesAt, createdAt, ownerId: config.ownerId || "root", resultsVisibility } });
+      await this.env.EVENTS.put(`event:${id}`, JSON.stringify(config), { metadata: { id, name, opensAt, closesAt, createdAt, lifecycle: config.lifecycle || "published", ownerId: config.ownerId || "root", resultsVisibility } });
     } catch {
       console.error(JSON.stringify({ event: "event_catalog_retry", eventId: id }));
       await this.ctx.storage.setAlarm(Date.now() + 60_000);
@@ -653,7 +688,7 @@ export class EventCoordinator extends DurableObject {
     const row = this.sql.exec("SELECT settings_json FROM event_display WHERE singleton = 1").toArray()[0];
     if (row) return JSON.parse(row.settings_json);
     const config = this.getConfig();
-    return { resultsVisibility: config?.resultsVisibility || "after-close", presentation: config?.presentation || { theme: "ink", organizer: "", description: "", logoUrl: "" } };
+    return { resultsVisibility: config?.resultsVisibility || "after-close", presentation: config?.presentation || { theme: "ink", organizer: "", description: "", logoUrl: "", coverUrl: "" } };
   }
 
   async updateDisplaySettings(update) {
@@ -666,8 +701,20 @@ export class EventCoordinator extends DurableObject {
 
   async updateBallot(update) {
     const config = this.getConfig();
-    if (!config || phase(config) !== "pending") return null;
+    if (!config || !["draft", "pending"].includes(phase(config))) return null;
+    if ((update.opensAt !== undefined || update.closesAt !== undefined) && phase(config) !== "draft") return null;
     const event = { ...config, ...update };
+    this.sql.exec("UPDATE event_config SET config_json = ? WHERE singleton = 1", JSON.stringify(event));
+    this.snapshotValue = null;
+    await this.ctx.storage.setAlarm(Date.now() + 5000);
+    await this.ctx.storage.sync();
+    return event;
+  }
+
+  async publish() {
+    const config = this.getConfig();
+    if (!config || phase(config) !== "draft" || timestamp(config.closesAt) <= Date.now()) return null;
+    const event = { ...config, lifecycle: "published" };
     this.sql.exec("UPDATE event_config SET config_json = ? WHERE singleton = 1", JSON.stringify(event));
     this.snapshotValue = null;
     await this.ctx.storage.setAlarm(Date.now() + 5000);
@@ -686,7 +733,12 @@ export class EventCoordinator extends DurableObject {
       // Every edge location reaches this same event object. Concurrent cache
       // misses share one aggregation rather than each reading all vote shards.
       if (!this.refreshPromise) {
-        this.refreshPromise = readResults(this.env, config).then((tally) => {
+        // Unpublished/not-yet-open ballots cannot have votes. Previewing one
+        // should not wake all 128 vote shards just to discover zero counts.
+        const tally = ["draft", "pending"].includes(state)
+          ? Promise.resolve({ turnout: 0, counts: Object.fromEntries(config.options.map((option) => [option.id, 0])) })
+          : readResults(this.env, config);
+        this.refreshPromise = tally.then((tally) => {
           const refreshedAt = Date.now();
           this.snapshotValue = { ...tally, phase: state, refreshedAt, updatedAt: new Date(refreshedAt).toISOString() };
           return this.snapshotValue;

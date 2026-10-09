@@ -9,7 +9,7 @@ const reportElements = Object.fromEntries([
 
 const reportEventId = new URLSearchParams(location.search).get("event");
 const validReportEvent = /^[a-f0-9]{24}$/.test(reportEventId || "");
-const reportLabels = { draft: "尚未開放", pending: "等待開始", open: "投票進行中", closed: "投票已結束" };
+const reportLabels = { draft: "草稿預覽", pending: "等待開始", open: "投票進行中", closed: "投票已結束" };
 const reportTime = new Intl.DateTimeFormat("zh-HK", { timeZone: "Asia/Hong_Kong", dateStyle: "medium", timeStyle: "medium" });
 let currentReport = null;
 let reportLoading = false;
@@ -28,7 +28,7 @@ function canExportReport() {
 }
 
 function hasReportCounts(report) {
-  return report?.counts !== null && typeof report?.counts === "object" && !Array.isArray(report.counts);
+  return report?.phase !== "draft" && report?.counts !== null && typeof report?.counts === "object" && !Array.isArray(report.counts);
 }
 
 function setReportMessage(text, error = false) {
@@ -43,13 +43,13 @@ function renderReport(data) {
   const hasCounts = hasReportCounts(data);
   const turnout = reportCount(data.turnout);
   const phase = reportLabels[data.phase] || "讀取活動資料中";
-  document.title = `${data.name} · ${closed ? "最終結果" : "即時結果（未截止）"} · WeVote`;
+  document.title = `${data.name} · ${data.phase === "draft" ? "草稿預覽" : closed ? "最終結果" : "即時結果（未截止）"} · WeVote`;
   reportElements["event-title"].textContent = data.name;
   reportElements["event-question"].textContent = data.question;
   applyEventPresentation(reportElements["event-presentation"], data.presentation, data.name);
   reportElements["report-phase"].textContent = phase;
   reportElements["report-turnout"].textContent = turnout.toLocaleString("zh-HK");
-  reportElements["report-visibility"].textContent = closed
+  reportElements["report-visibility"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。以下內容只供預覽。" : closed
     ? turnout === 0 ? "活動已截止，未有已記錄投票。" : "投票已截止，以下顯示各選項嘅已記錄票數。"
     : `${turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票。"}開啟連結或掃碼唔會計票。票數約每 10 秒更新${hasCounts ? "。" : "，各選項結果會於截止後公開。"}`;
   reportElements["report-opens"].textContent = formatReportTime(data.opensAt);
@@ -61,9 +61,9 @@ function renderReport(data) {
   reportElements["final-results"].hidden = !hasCounts;
   reportElements["csv-button"].disabled = !canExport;
   reportElements["print-button"].disabled = !canExport;
-  reportElements["export-note"].textContent = canExport ? closed ? "下載完整票數摘要，或使用瀏覽器列印功能另存 PDF。" : "可保存目前票數摘要。活動仍在進行，報告會標示「未截止」及資料更新時間。" : "各選項結果公開後可下載 CSV，或列印及另存 PDF。";
-  reportElements["waiting-title"].textContent = data.phase === "closed" ? "結果整理中" : "投票截止後公布結果";
-  reportElements["waiting-copy"].textContent = data.phase === "closed" ? "活動已截止，正在讀取最終結果。請稍候。" : "活動進行期間只顯示參與人數。各選項票數及百分比會喺截止後公開。";
+  reportElements["export-note"].textContent = data.phase === "draft" ? "草稿未發佈，暫時未有投票報告。" : canExport ? closed ? "下載完整票數摘要，或使用瀏覽器列印功能另存 PDF。" : "可保存目前票數摘要。活動仍在進行，報告會標示「未截止」及資料更新時間。" : "各選項結果公開後可下載 CSV，或列印及另存 PDF。";
+  reportElements["waiting-title"].textContent = data.phase === "draft" ? "草稿預覽" : data.phase === "closed" ? "結果整理中" : "投票截止後公布結果";
+  reportElements["waiting-copy"].textContent = data.phase === "draft" ? "活動未發佈，唔接受投票。主辦方發佈後先會按設定開放投票同顯示結果。" : data.phase === "closed" ? "活動已截止，正在讀取最終結果。請稍候。" : "活動進行期間只顯示參與人數。各選項票數及百分比會喺截止後公開。";
 
   if (hasCounts) {
     reportElements["results-title"].textContent = closed ? "最終投票分佈" : "即時結果（未截止）";

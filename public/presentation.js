@@ -1,6 +1,14 @@
 const eventThemes = new Set(["ink", "ocean", "forest", "terracotta"]);
 const renderedPresentation = new WeakMap();
 
+function presentationImageUrl(value) {
+  if (typeof value !== "string" || !value || value.length > 2048) return "";
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password ? parsed.href : "";
+  } catch { return ""; }
+}
+
 /** Render approved event branding without accepting HTML or arbitrary CSS. */
 export function applyEventPresentation(container, presentation = {}, eventName = "") {
   const config = presentation && typeof presentation === "object" ? presentation : {};
@@ -10,18 +18,15 @@ export function applyEventPresentation(container, presentation = {}, eventName =
 
   const organizer = typeof config.organizer === "string" ? config.organizer.slice(0, 100) : "";
   const description = typeof config.description === "string" ? config.description.slice(0, 1000) : "";
-  let logoUrl = "";
-  if (typeof config.logoUrl === "string" && config.logoUrl) {
-    try {
-      const parsed = new URL(config.logoUrl);
-      if (parsed.protocol === "https:" && !parsed.username && !parsed.password) logoUrl = parsed.href;
-    } catch { /* An invalid logo does not prevent voting or results. */ }
-  }
-  const signature = JSON.stringify([theme, organizer, description, logoUrl, eventName]);
+  const logoUrl = presentationImageUrl(config.logoUrl);
+  const coverUrl = presentationImageUrl(config.coverUrl);
+  let logoVisible = Boolean(logoUrl);
+  let coverVisible = Boolean(coverUrl);
+  const signature = JSON.stringify([theme, organizer, description, logoUrl, coverUrl, eventName]);
   if (renderedPresentation.get(container) === signature) return;
   renderedPresentation.set(container, signature);
   container.replaceChildren();
-  container.hidden = !organizer && !description && !logoUrl;
+  container.hidden = !organizer && !description && !logoUrl && !coverUrl;
   if (container.hidden) return;
 
   if (logoUrl) {
@@ -34,7 +39,8 @@ export function applyEventPresentation(container, presentation = {}, eventName =
     image.decoding = "async";
     image.addEventListener("error", () => {
       image.hidden = true;
-      if (!organizer && !description) container.hidden = true;
+      logoVisible = false;
+      if (!organizer && !description && !coverVisible) container.hidden = true;
     }, { once: true });
     image.src = logoUrl;
     container.append(image);
@@ -58,5 +64,22 @@ export function applyEventPresentation(container, presentation = {}, eventName =
       copy.append(text);
     }
     container.append(copy);
+  }
+  if (coverUrl) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "event-presentation-cover-wrap";
+    const image = document.createElement("img");
+    image.className = "event-presentation-cover";
+    image.alt = `${eventName || organizer || "活動"} 封面海報`;
+    image.referrerPolicy = "no-referrer";
+    image.decoding = "async";
+    image.addEventListener("error", () => {
+      wrapper.hidden = true;
+      coverVisible = false;
+      if (!organizer && !description && !logoVisible) container.hidden = true;
+    }, { once: true });
+    image.src = coverUrl;
+    wrapper.append(image);
+    container.append(wrapper);
   }
 }

@@ -56,6 +56,7 @@
 #report-dashboard:fullscreen .report-question { font-size: clamp(17px, 1.8vw, 24px); margin-top: 8px; }
 #report-dashboard:fullscreen .event-presentation { margin: 12px 0; }
 #report-dashboard:fullscreen .event-presentation-logo { width: 48px; height: 48px; flex-basis: 48px; }
+#report-dashboard:fullscreen .event-presentation-cover { max-height: 140px; width: auto; max-width: 220px; object-fit: contain; }
 #report-dashboard:fullscreen .event-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-width: none; }
 #report-dashboard:fullscreen #report-content { display: flex; flex-direction: column; gap: 18px; flex: 1; min-height: 0; }
 #report-dashboard:fullscreen .report-overview { grid-template-columns: .8fr 1.2fr; flex: 0 0 auto; }

@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 const elements = Object.fromEntries([
   "phase-label", "poll-id", "close-time", "status-pill", "question-title", "vote-subtitle", "vote-form",
   "options", "turnstile", "vote-button", "vote-message", "turnout", "phase-detail", "countdown",
-  "updated-at", "result-area", "result-bars",
+  "updated-at", "result-area", "result-bars", "draft-options",
 ].map((id) => [id, $(id)]));
 
 let poll = null;
@@ -68,7 +68,7 @@ function renderOptions(options) {
 
 function renderResults(data) {
   const area = elements["result-area"];
-  const hasCounts = data.counts !== null && typeof data.counts === "object" && !Array.isArray(data.counts);
+  const hasCounts = data.phase !== "draft" && data.counts !== null && typeof data.counts === "object" && !Array.isArray(data.counts);
   area.hidden = false;
   const title = area.querySelector("h3");
   if (title) title.textContent = hasCounts ? data.phase === "closed" ? "最終結果" : "即時投票分佈" : "各選項結果";
@@ -77,7 +77,7 @@ function renderResults(data) {
   if (!hasCounts || data.turnout === 0) {
     const note = document.createElement("p");
     note.className = "card-subtitle";
-    note.textContent = !hasCounts ? "各選項結果會於截止後公開。" : data.phase === "closed" ? "未有已記錄投票。" : "暫時未有人投票。";
+    note.textContent = data.phase === "draft" ? "草稿未發佈，暫時唔接受投票。" : data.phase === "pending" && data.resultsVisibility === "live" ? "開始投票後會即時公開各選項結果。" : !hasCounts ? "各選項結果會於截止後公開。" : data.phase === "closed" ? "未有已記錄投票。" : "暫時未有人投票。";
     list.append(note);
     if (!hasCounts) return;
   }
@@ -111,6 +111,7 @@ function renderResults(data) {
 let lastCloseRefresh = 0;
 function renderCountdown() {
   if (!poll) return;
+  if (poll.phase === "draft") { elements.countdown.textContent = "未發佈"; return; }
   const delta = new Date(poll.closesAt).getTime() - Date.now();
   if (delta <= 0) {
     updateButton();
@@ -142,6 +143,20 @@ function renderPoll(data) {
     renderOptions(data.options);
     renderedOptions = optionsVersion;
   }
+  const draftOptions = elements["draft-options"];
+  draftOptions.hidden = !["draft", "pending"].includes(data.phase);
+  draftOptions.replaceChildren();
+  if (["draft", "pending"].includes(data.phase)) {
+    const heading = document.createElement("h3");
+    heading.textContent = "投票選項預覽";
+    const list = document.createElement("ol");
+    for (const option of data.options) {
+      const item = document.createElement("li");
+      item.textContent = option.label;
+      list.append(item);
+    }
+    draftOptions.append(heading, list);
+  }
   if (first) {
     if (canVote && !recorded && data.phase === "open") void loadTurnstile(data.turnstileSiteKey);
   }
@@ -150,7 +165,7 @@ function renderPoll(data) {
     document.title = `${data.name} · WeVote`;
     $("page-title").textContent = data.name;
     const introCopy = document.querySelector(".intro-copy");
-    if (introCopy) introCopy.textContent = data.counts !== null ? "選擇你支持嘅選項，確認後即時記錄。活動票數及分佈會定時更新。" : "選擇你支持嘅選項，確認後即時記錄。各選項結果會喺截止後公開。";
+    if (introCopy) introCopy.textContent = data.phase === "draft" ? "呢個活動係草稿預覽。主辦方發佈後先會按預定時間接受投票。" : data.phase === "pending" ? `投票將於 ${formatTime(data.opensAt)}（香港時間）開始。現階段可以預覽參賽選項。` : data.counts !== null ? "選擇你支持嘅選項，確認後即時記錄。活動票數及分佈會定時更新。" : "選擇你支持嘅選項，確認後即時記錄。各選項結果會喺截止後公開。";
     const reportLink = $("event-results-link");
     if (reportLink) { reportLink.href = `/results.html?event=${eventId}`; reportLink.hidden = false; }
   }
@@ -160,17 +175,19 @@ function renderPoll(data) {
   elements.turnout.textContent = data.turnout.toLocaleString("zh-HK");
   const turnoutNote = document.querySelector(".live-footnote");
   if (turnoutNote) {
-    if (data.phase === "closed") turnoutNote.textContent = data.turnout === 0 ? "活動已截止，未有已記錄投票。開啟連結或掃碼唔會計票。" : "只計已成功提交嘅投票。正式結果已喺下方公布。";
+    if (data.phase === "draft") turnoutNote.textContent = "草稿預覽只供核對內容，唔接受投票。發佈後先按預定時間開放。";
+    else if (data.phase === "closed") turnoutNote.textContent = data.turnout === 0 ? "活動已截止，未有已記錄投票。開啟連結或掃碼唔會計票。" : "只計已成功提交嘅投票。正式結果已喺下方公布。";
     else if (data.phase === "pending") turnoutNote.textContent = "活動未開始。開啟連結或掃碼唔會計票，成功提交投票後先會記錄。";
     else turnoutNote.textContent = `${data.turnout === 0 ? "呢個活動暫時未有已記錄投票。" : "只計已成功提交嘅投票，唔包括開啟連結或掃碼次數。"}票數約每 10 秒更新，剛提交可能要稍等。`;
   }
   elements["updated-at"].textContent = new Intl.DateTimeFormat("zh-HK", { timeZone: "Asia/Hong_Kong", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(data.updatedAt));
-  const labels = { pending: "等待開始", open: "投票進行中", closed: "投票已結束" };
+  const labels = { draft: "草稿預覽", pending: "等待開始", open: "投票進行中", closed: "投票已結束" };
   elements["phase-label"].textContent = labels[data.phase];
   elements["status-pill"].textContent = labels[data.phase];
   elements["phase-detail"].textContent = labels[data.phase];
   elements["vote-form"].hidden = data.phase !== "open" || !canVote || recorded;
-  if (data.phase === "pending") elements["vote-subtitle"].textContent = `投票將於 ${formatTime(data.opensAt)} 開始。`;
+  if (data.phase === "draft") elements["vote-subtitle"].textContent = "呢個活動未發佈，唔接受投票。以下只供預覽核對。";
+  else if (data.phase === "pending") elements["vote-subtitle"].textContent = `投票將於 ${formatTime(data.opensAt)} 開始。`;
   else if (data.phase === "closed") elements["vote-subtitle"].textContent = "投票已截止，多謝參與。";
   else if (!canVote) elements["vote-subtitle"].textContent = publicEvent ? "正在準備投票識別，請稍候。" : "請使用主辦方派發嘅獨立投票連結進入。";
   else if (recorded) elements["vote-subtitle"].textContent = "你嘅投票已經記錄。";
@@ -212,7 +229,7 @@ async function loadPoll() {
     if (!Number.isSafeInteger(data.turnout) || data.turnout < 0) throw new Error("參與票數未能讀取，稍後會再試。");
     renderPoll(data);
     if (transientError && !busy && !recorded) { message(""); transientError = false; }
-    if (publicEvent && poll.phase !== "closed" && !identityReady) void loadIdentity();
+    if (publicEvent && poll.phase === "open" && !identityReady) void loadIdentity();
   } catch (error) {
     message(error.name === "TimeoutError" ? "連線較慢，稍後會自動重試更新票數。" : error.message || "目前未能讀取投票資料。", "bad");
     transientError = true;
@@ -222,7 +239,7 @@ async function loadPoll() {
 }
 
 async function loadIdentity() {
-  if (!publicEvent || identityReady || identityLoading || poll?.phase === "closed") return;
+  if (!publicEvent || identityReady || identityLoading || poll?.phase !== "open") return;
   identityLoading = true;
   try {
     const response = await fetch(`${eventApi}/identity`, { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(25_000) });

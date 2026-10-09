@@ -48,11 +48,13 @@
             <section class="card admin-card" aria-labelledby="create-title">
               <div class="section-number">01 / 新活動</div>
               <h2 id="create-title">建立投票 event</h2>
-              <p class="admin-muted">同一條公開 link／QR 可以畀所有人使用。活動開始前可以修改內容，開始後題目同選項會鎖定。</p>
+              <p class="admin-muted">同一條公開 link／QR 可以畀所有人使用。可以先儲存草稿核對內容，發佈後先接受投票；活動開始後題目同選項會鎖定。</p>
               <form id="event-form" class="event-form">
                 <label for="event-name">活動名稱</label><input id="event-name" name="name" required maxlength="100" placeholder="例：年度會員大會">
                 <label for="event-question">投票問題</label><textarea id="event-question" name="question" required maxlength="300" rows="3" placeholder="例：你支持邊個方案？"></textarea>
                 <label for="event-options">選項 <small>每行一項，2–20 項</small></label><textarea id="event-options" name="options" required rows="8" placeholder="方案 A&#10;方案 B"></textarea>
+                <label class="check-row"><input id="save-draft" type="checkbox"> 儲存為草稿</label>
+                <p id="draft-help" class="event-setting-help" hidden>草稿只供預覽，唔接受投票。可先設定預定時間，之後喺活動編輯器發佈。</p>
                 <label class="check-row"><input id="open-now" type="checkbox" checked> 建立後即刻開始</label>
                 <label for="opens-at" id="opens-label" hidden>開始時間 <small>香港時間</small></label><input id="opens-at" type="datetime-local" hidden>
                 <label for="closes-at">截止時間 <small>香港時間</small></label><input id="closes-at" type="datetime-local" required>

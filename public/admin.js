@@ -3,6 +3,7 @@ import { mountEventShare } from "./share.js";
 const $ = (id) => document.getElementById(id);
 const roleLabels = { owner: "擁有人", admin: "管理員 · 全部活動", organizer: "活動管理員" };
 const justCreated = new Map();
+const eventShareMounts = new WeakMap();
 const pendingRequests = new Set();
 let principal = null;
 let sessionVersion = 0;
@@ -119,12 +120,30 @@ function hkDisplay(iso) {
 function resetEventTimes() {
   $("closes-at").value = hkInput(new Date(Date.now() + 86400_000));
   $("opens-at").value = hkInput(new Date(Date.now() + 120_000));
-  $("opens-label").hidden = true;
-  $("opens-at").hidden = true;
-  $("opens-at").required = false;
+  syncCreateTiming();
+}
+
+function syncCreateTiming() {
+  const draft = $("save-draft").checked;
+  if (draft) $("open-now").checked = false;
+  $("open-now").disabled = draft;
+  const immediate = !draft && $("open-now").checked;
+  $("opens-label").hidden = immediate;
+  $("opens-at").hidden = immediate;
+  $("opens-at").required = !immediate;
+  $("draft-help").hidden = !draft;
+  $("create-button").textContent = draft ? "儲存草稿 ↗" : "建立 event ↗";
+}
+
+function hkTime(value) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw new RangeError("請填有效嘅香港開始／截止時間。");
+  const date = new Date(`${value}:00+08:00`);
+  if (!Number.isFinite(date.getTime()) || hkInput(date) !== value) throw new RangeError("請填有效嘅香港開始／截止時間。");
+  return date.toISOString();
 }
 
 function eventPhase(event) {
+  if (event.lifecycle === "draft") return ["草稿 · 未發佈", "draft"];
   const now = Date.now();
   if (now < Date.parse(event.opensAt)) return ["未開始", "pending"];
   if (now >= Date.parse(event.closesAt)) return ["已截止", "closed"];
@@ -135,6 +154,25 @@ function makeShareUrl(id) {
   const url = new URL("/vote.html", publicBaseUrl);
   url.searchParams.set("event", id);
   return url.toString();
+}
+
+function refreshEventCard(item, event) {
+  const [label, phase] = eventPhase(event);
+  item.querySelector(".event-title").textContent = event.name;
+  const badge = item.querySelector(".event-status");
+  badge.textContent = label;
+  badge.className = `event-status ${phase}`;
+  item.querySelector(".event-times").textContent = `${phase === "draft" ? "預定 " : ""}${hkDisplay(event.opensAt)} 開始 · ${hkDisplay(event.closesAt)} 截止`;
+  const draftNote = item.querySelector(".event-draft-note");
+  if (draftNote) draftNote.hidden = phase !== "draft";
+  const share = eventShareMounts.get(item);
+  if (share) {
+    const index = shareTools.indexOf(share.tool);
+    share.tool.destroy();
+    share.tool = mountEventShare(share.container, { url: makeShareUrl(event.id), name: event.name, question: event.question || "" });
+    if (index >= 0) shareTools[index] = share.tool;
+    else shareTools.push(share.tool);
+  }
 }
 
 function visibilitySelect(value) {
@@ -159,7 +197,8 @@ function editorField(form, text, tag = "input", attributes = {}) {
 
 function appendResultSettings(item, event) {
   const block = node("details", "event-editor");
-  block.append(node("summary", "", "編輯活動內容同外觀"));
+  const summary = node("summary", "", event.lifecycle === "draft" ? "編輯草稿／發佈活動" : "編輯活動內容同外觀");
+  block.append(summary);
   const body = node("div", "event-editor-body");
   const loading = node("p", "event-setting-help", "展開後載入活動設定。");
   loading.setAttribute("role", "status");
@@ -194,40 +233,98 @@ function appendResultSettings(item, event) {
   function buildContentEditor(detail) {
     const section = node("section", "event-editor-section");
     section.append(node("h4", "", "活動內容"));
-    const editable = eventPhase(detail)[1] === "pending";
-    section.append(node("p", "event-setting-help", editable ? "開始前可以修改名稱、題目同選項。開始後內容會鎖定。" : "活動已開始，名稱、題目同選項已鎖定。"));
+    let isDraft = detail.lifecycle === "draft";
+    const editable = isDraft || eventPhase(detail)[1] === "pending";
+    const help = node("p", "event-setting-help", isDraft ? "草稿可修改內容及預定時間。先儲存修改，核對後再發佈。" : editable ? "開始前可以修改名稱、題目同選項。開始後內容會鎖定。" : "活動已開始，名稱、題目同選項已鎖定。");
+    section.append(help);
     const form = node("form", "event-editor-form");
     const name = editorField(form, "活動名稱", "input", { type: "text", value: detail.name, required: true, maxLength: 100, disabled: !editable });
     const question = editorField(form, "投票問題", "textarea", { value: detail.question, required: true, maxLength: 300, rows: 3, disabled: !editable });
     const labels = detail.options.map((option) => typeof option === "string" ? option : option.label).join("\n");
     const options = editorField(form, "選項 · 每行一項，2–20 項", "textarea", { value: labels, required: true, rows: Math.min(8, Math.max(3, detail.options.length)), disabled: !editable });
+    const opens = isDraft ? editorField(form, "預定開始時間 · 香港時間", "input", { type: "datetime-local", value: hkInput(new Date(detail.opensAt)), required: true }) : null;
+    const closes = isDraft ? editorField(form, "截止時間 · 香港時間", "input", { type: "datetime-local", value: hkInput(new Date(detail.closesAt)), required: true }) : null;
     const status = node("p", "event-access-status");
     status.setAttribute("role", "status");
     if (editable) {
       const save = node("button", "small-button", "儲存活動內容");
       save.type = "submit";
       form.append(save);
+      let working = false;
+      function contentBody() {
+        const labels = options.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+        if (!name.value.trim() || !question.value.trim()) throw new Error("請填活動名稱同投票問題。");
+        if (labels.length < 2 || labels.length > 20 || labels.some((label) => label.length > 100)) throw new Error("請填 2–20 個選項，每項最多 100 字。");
+        const value = { name: name.value.trim(), question: question.value.trim(), options: labels };
+        if (isDraft) {
+          value.opensAt = hkTime(opens.value);
+          value.closesAt = hkTime(closes.value);
+          if (Date.parse(value.closesAt) <= Date.parse(value.opensAt)) throw new Error("截止時間必須遲過開始時間。");
+        }
+        return value;
+      }
+      let savedState;
+      try { savedState = JSON.stringify(contentBody()); } catch { savedState = ""; }
+      const publish = isDraft ? action("發佈活動", async () => {
+        if (working || !isDraft) return;
+        try {
+          if (JSON.stringify(contentBody()) !== savedState) { status.textContent = "有未儲存嘅修改。請先按「儲存活動內容」，再發佈；已填資料會保留。"; return; }
+          if (Date.parse(hkTime(closes.value)) <= Date.now()) { status.textContent = "截止時間已過。請先修改並儲存香港開始／截止時間，再發佈。"; return; }
+        } catch (error) { status.textContent = error.message; return; }
+        const version = sessionVersion;
+        working = true;
+        save.disabled = true;
+        publish.disabled = true;
+        status.textContent = "正在發佈活動…";
+        try {
+          const data = await send(`/api/admin/events/${event.id}/publish`, "POST", {});
+          if (stale(version)) return;
+          const display = { resultsVisibility: event.resultsVisibility, presentation: event.presentation };
+          Object.assign(event, data.event, display);
+          Object.assign(detail, data.event, display);
+          isDraft = false;
+          opens.disabled = true;
+          closes.disabled = true;
+          publish.hidden = true;
+          const pending = eventPhase(event)[1] === "pending";
+          for (const input of [name, question, options]) input.disabled = !pending;
+          help.textContent = pending ? "活動已發佈，開始前仍可修改名稱、題目同選項。預定時間已鎖定。" : "活動已發佈並開始，名稱、題目同選項已鎖定。";
+          summary.textContent = "編輯活動內容同外觀";
+          refreshEventCard(item, event);
+          status.textContent = pending ? "已發佈。到預定開始時間後接受投票，分享連結同 QR code 繼續有效。" : "已發佈，現正接受投票。分享連結同 QR code 繼續有效。";
+        } catch (error) { if (!cancelled(error) && !stale(version)) status.textContent = error.message; }
+        finally {
+          working = false;
+          save.disabled = !isDraft && eventPhase(event)[1] !== "pending";
+          publish.disabled = false;
+        }
+      }) : null;
+      if (publish) {
+        form.append(publish, node("p", "event-setting-help", "發佈會沿用已儲存嘅預定時間。開始時間已到就即刻接受投票；未到就等待開始。截止時間必須仍然有效。"));
+      }
       form.addEventListener("submit", async (submit) => {
         submit.preventDefault();
+        if (working) return;
         const version = sessionVersion;
-        const labels = options.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-        if (labels.length < 2 || labels.length > 20 || labels.some((label) => label.length > 100)) {
-          status.textContent = "請填 2–20 個選項，每項最多 100 字。";
-          return;
-        }
+        let value;
+        try { value = contentBody(); } catch (error) { status.textContent = error.message; return; }
+        working = true;
         save.disabled = true;
+        if (publish) publish.disabled = true;
         status.textContent = "正在儲存內容…";
         try {
-          const data = await send(`/api/admin/events/${event.id}`, "PATCH", { name: name.value.trim(), question: question.value.trim(), options: labels });
+          const data = await send(`/api/admin/events/${event.id}`, "PATCH", value);
           if (stale(version)) return;
           // Display settings have their own authoritative storage and can be
           // newer than the raw ballot config returned after a content edit.
           const display = { resultsVisibility: event.resultsVisibility, presentation: event.presentation };
           Object.assign(event, data.event, display);
-          renderEvents(knownEvents);
-          note("events-message", "活動內容已更新，分享連結同 QR code 繼續有效。", "good");
+          Object.assign(detail, data.event, display);
+          savedState = JSON.stringify(contentBody());
+          refreshEventCard(item, event);
+          status.textContent = "活動內容已更新，分享連結同 QR code 繼續有效。";
         } catch (error) { if (!cancelled(error) && !stale(version)) status.textContent = error.message; }
-        finally { save.disabled = false; }
+        finally { working = false; save.disabled = !isDraft && eventPhase(event)[1] !== "pending"; if (publish) publish.disabled = false; }
       });
     }
     section.append(form, status);
@@ -252,7 +349,8 @@ function appendResultSettings(item, event) {
     const organizer = editorField(form, "主辦方名稱", "input", { type: "text", value: presentation.organizer || "", maxLength: 100, placeholder: "例：DAA.HK" });
     const description = editorField(form, "活動介紹", "textarea", { value: presentation.description || "", maxLength: 1000, rows: 4, placeholder: "介紹活動背景、投票安排或參與須知" });
     const logo = editorField(form, "Logo 圖片網址 · HTTPS", "input", { type: "url", value: presentation.logoUrl || "", maxLength: 2048, placeholder: "https://example.com/logo.png" });
-    form.append(node("p", "event-setting-help", "使用可公開讀取嘅圖片網址；留空即可移除 Logo。"));
+    const cover = editorField(form, "封面圖片網址 · HTTPS", "input", { type: "url", value: presentation.coverUrl || "", maxLength: 2048, placeholder: "https://example.com/event-poster.jpg" });
+    form.append(node("p", "event-setting-help", "使用可公開讀取嘅圖片網址；封面會以寬版海報顯示。留空即可移除圖片。"));
     const save = node("button", "small-button", "儲存公開時間同外觀");
     save.type = "submit";
     const status = node("p", "event-access-status");
@@ -262,16 +360,18 @@ function appendResultSettings(item, event) {
       submit.preventDefault();
       const version = sessionVersion;
       const logoUrl = logo.value.trim();
-      if (logoUrl) {
+      const coverUrl = cover.value.trim();
+      for (const imageUrl of [logoUrl, coverUrl]) {
+        if (!imageUrl) continue;
         try {
-          const url = new URL(logoUrl);
+          const url = new URL(imageUrl);
           if (url.protocol !== "https:" || url.username || url.password) throw new Error("Invalid logo URL");
         } catch { status.textContent = "請填有效嘅 HTTPS 圖片網址，或者留空。"; return; }
       }
       save.disabled = true;
       status.textContent = "正在儲存設定…";
       try {
-        const nextPresentation = { theme: theme.value, organizer: organizer.value.trim(), description: description.value.trim(), logoUrl };
+        const nextPresentation = { theme: theme.value, organizer: organizer.value.trim(), description: description.value.trim(), logoUrl, coverUrl };
         const data = await send(`/api/admin/events/${event.id}/settings`, "PATCH", { resultsVisibility: visibility.value, presentation: nextPresentation });
         if (stale(version)) return;
         event.resultsVisibility = data.resultsVisibility || visibility.value;
@@ -345,11 +445,13 @@ function renderEvents(events) {
     const item = node("article", "event-item");
     const head = node("div", "event-head");
     const title = node("div");
-    title.append(node("h3", "", event.name), node("span", "event-id", `ID ${event.id}`));
+    title.append(node("h3", "event-title", event.name), node("span", "event-id", `ID ${event.id}`));
     head.append(title, node("span", `event-status ${phase}`, label));
-    const times = node("p", "event-times", `${hkDisplay(event.opensAt)} 開始 · ${hkDisplay(event.closesAt)} 截止`);
+    const times = node("p", "event-times", `${phase === "draft" ? "預定 " : ""}${hkDisplay(event.opensAt)} 開始 · ${hkDisplay(event.closesAt)} 截止`);
     const share = node("div");
-    shareTools.push(mountEventShare(share, { url: makeShareUrl(event.id), name: event.name, question: event.question || "" }));
+    const shareTool = mountEventShare(share, { url: makeShareUrl(event.id), name: event.name, question: event.question || "" });
+    shareTools.push(shareTool);
+    eventShareMounts.set(item, { container: share, tool: shareTool });
     const tools = node("div", "event-tools");
     const report = node("a", "small-button", "結果／CSV／PDF 報告 ↗");
     report.href = `/results.html?event=${event.id}`;
@@ -361,7 +463,9 @@ function renderEvents(events) {
     raw.disabled = phase !== "closed";
     tools.append(report, raw);
     const resultMode = node("p", "event-results-mode", event.resultsVisibility === "live" ? "結果：即時公開" : "結果：截止後公開");
-    item.append(head, times, resultMode, share, tools, progress);
+    const draftNote = node("p", "event-draft-note", "草稿只供預覽，發佈前唔接受投票。請展開「編輯草稿／發佈活動」核對內容同時間，再發佈。" );
+    draftNote.hidden = phase !== "draft";
+    item.append(head, times, resultMode, draftNote, share, tools, progress);
     appendResultSettings(item, event);
     if (principal?.role === "owner") appendEventAccess(item, event);
     list.append(item);
@@ -575,11 +679,8 @@ $("refresh-accounts").addEventListener("click", async () => {
   finally { $("refresh-accounts").disabled = false; }
 });
 
-$("open-now").addEventListener("change", () => {
-  $("opens-label").hidden = $("open-now").checked;
-  $("opens-at").hidden = $("open-now").checked;
-  $("opens-at").required = !$("open-now").checked;
-});
+$("open-now").addEventListener("change", syncCreateTiming);
+$("save-draft").addEventListener("change", syncCreateTiming);
 
 $("event-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -589,11 +690,13 @@ $("event-form").addEventListener("submit", async (event) => {
   $("create-button").disabled = true;
   note("create-message", "正在建立活動…");
   try {
-    const opensAt = $("open-now").checked ? new Date().toISOString() : new Date(`${$("opens-at").value}:00+08:00`).toISOString();
-    const closesAt = new Date(`${$("closes-at").value}:00+08:00`).toISOString();
+    const lifecycle = $("save-draft").checked ? "draft" : "published";
+    const opensAt = $("open-now").checked && lifecycle === "published" ? new Date().toISOString() : hkTime($("opens-at").value);
+    const closesAt = hkTime($("closes-at").value);
+    if (Date.parse(closesAt) <= Date.parse(opensAt)) throw new Error("截止時間必須遲過開始時間。");
     const data = await send("/api/admin/events", "POST", {
       name: $("event-name").value, question: $("event-question").value, options, opensAt, closesAt,
-      resultsVisibility: $("results-visibility").value,
+      resultsVisibility: $("results-visibility").value, lifecycle,
     });
     if (stale(version)) return;
     publicBaseUrl = data.publicBaseUrl || location.origin;
@@ -601,7 +704,7 @@ $("event-form").addEventListener("submit", async (event) => {
     renderEvents([data.event, ...knownEvents.filter((item) => item.id !== data.event.id)]);
     $("event-form").reset();
     resetEventTimes();
-    note("create-message", data.catalogPending ? "活動已建立，可以分享。活動列表索引暫時延遲，系統會自動重試。" : "活動已建立。請先打開分享連結核對內容，再派 QR code。", "good");
+    note("create-message", lifecycle === "draft" ? "草稿已儲存。連結只供預覽，發佈前唔接受投票；核對內容同預定時間後再發佈。" : data.catalogPending ? "活動已建立，可以分享。活動列表索引暫時延遲，系統會自動重試。" : "活動已建立。請先打開分享連結核對內容，再派 QR code。", "good");
   } catch (error) { if (!cancelled(error) && !stale(version)) note("create-message", error instanceof RangeError ? "請填有效嘅香港開始／截止時間。" : error.message, "bad"); }
   finally { $("create-button").disabled = false; }
 });

@@ -98,10 +98,18 @@ body[data-theme] .bar-fill { background: var(--event-accent); }
 body[data-theme] .bar { background: var(--event-border); }
 body[data-theme] .option:has(input:checked) { background: var(--event-soft); border-color: var(--event-accent); box-shadow: 0 0 0 2px var(--event-border); }
 body[data-theme] .option input:checked { border-color: var(--event-accent); }
-.event-presentation { display: flex; align-items: start; gap: 18px; margin: 22px 0 15px; }
+.event-presentation { display: flex; flex-wrap: wrap; align-items: start; gap: 18px; margin: 22px 0 15px; }
 .event-presentation[hidden], .event-presentation-logo[hidden] { display: none; }
 .event-presentation-logo { width: 72px; height: 72px; max-width: 72px; max-height: 72px; object-fit: contain; flex: 0 0 72px; padding: 6px; border: 1px solid var(--event-border, #cddde2); background: #fff; border-radius: 10px; }
-.event-presentation-copy { min-width: 0; }
+.event-presentation-copy { min-width: 0; flex: 1 1 160px; }
+.event-presentation-cover-wrap { flex-basis: 100%; margin-top: 2px; }
+.event-presentation-cover-wrap[hidden] { display: none; }
+.event-presentation-cover { display: block; width: 100%; max-width: 560px; height: auto; border: 1px solid var(--event-border, #cddde2); border-radius: 10px; background: #fff; }
+.draft-options { margin: 20px 0; padding: 18px 20px; border: 1px dashed var(--event-border, #cddde2); border-radius: 9px; background: var(--event-soft, #edf4f5); }
+.draft-options[hidden] { display: none; }
+.draft-options h3 { font-size: 13px; margin: 0 0 12px; color: var(--event-strong, #214760); }
+.draft-options ol { padding-left: 22px; margin: 0; color: #435e70; font-size: 13px; line-height: 1.8; }
+.draft-options li { padding: 3px 0; overflow-wrap: anywhere; }
 .event-organizer-label { margin: 0 0 4px; color: #758792; font-size: 10px; font-weight: 700; letter-spacing: .06em; }
 .event-organizer { margin: 0; color: var(--event-strong, #214760); font-size: 15px; font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
 .event-description { max-width: 720px; margin: 8px 0 0; color: #5e7380; font-size: 13px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
