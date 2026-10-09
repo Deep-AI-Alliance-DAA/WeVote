@@ -23,6 +23,7 @@ WeVote takes inspiration from Keith Li's emphasis on shared caching and reducing
 - Independent events with 2–20 options, single or multiple selections, drafts, preview, publication, and scheduled opening/closing.
 - Owner, administrator, and organizer roles; individual login keys and event assignments.
 - Optional public organizer registration through Google or Apple, with a bounded trial event.
+- Optional Stripe hosted Checkout for one-time additional event credits, with server-verified payment and quota updates.
 - A first-use admin guide for login, event setup, sharing, and reports; skip it or reopen it with “使用導覽”.
 - Event content editing before voting begins; organizer text, HTTPS logo/cover images, and four color themes.
 - A link and QR code for each event, downloadable QR artwork, and sharing tools for WhatsApp, Facebook, X, and Instagram workflows.
@@ -49,7 +50,21 @@ When an operator configures Google or Apple sign-in, a visitor can register from
 
 Google and Apple are independently configured and unavailable until their credentials are installed. See [organizer sign-in setup](docs/ORGANIZER_AUTH.md). Provider identities are separate app accounts; the app does not merge accounts by email or establish one account per person. Voters still use the public voting link and Turnstile.
 
-The 10,000-vote allowance is a storage limit. Simultaneous 10,000-person voting capacity has not been established by a burst test. Operator hosting costs still depend on platform usage. Payments, subscriptions, and Stripe integration are not implemented.
+The 10,000-vote allowance is a storage limit. Simultaneous 10,000-person voting capacity has not been established by a burst test. Operator hosting costs still depend on platform usage.
+
+## Additional event credits
+
+An operator can configure **Stripe hosted Checkout** to sell an additional event credit through the organizer dashboard after the free event allowance is used. Each credit creates **one event**, including a draft, with **up to 10,000 recorded ballots** and a **maximum seven-day voting period**. The original free allowance remains one lifetime event with a 24-hour period; buying a credit does not reset it. Owner/admin and existing key-based organizers continue creating events within their normal permissions without buying credits.
+
+The server provides the configured HKD price, payment mode and event limits. Checkout is unavailable until the complete payment configuration is installed. WeVote redirects to Stripe's hosted payment page and does not collect card numbers. This is a one-time purchase, not a recurring subscription.
+
+Returning from Checkout does not itself grant a credit. The server verifies the owned order and payment, and records fulfillment once; webhook delivery and return-page reconciliation use that same durable fulfillment process. The dashboard shows verification, unfinished checkout, credited, failed, expired, refund and review states. Retrying an ambiguous checkout creation reuses its request ID. A new checkout request is available only after the server confirms the previous creation was rejected without creating a payment, or another terminal checkout state is reached. Retrying event creation uses its separate frozen event request. A cancelled return can resume the same unpaid checkout. Saving a paid draft consumes one credit, and replaying the same successful event request does not consume another.
+
+**Test mode is restricted to explicitly allowed organizer accounts.** Test and live credits are separate, and test Checkout does not collect real money. Unconfigured or unavailable billing does not unlock extra event creation. Administrators should configure and test billing on their own installation before enabling live payments.
+
+The application supports live Checkout when the operator installs matching live credentials, Price and webhook configuration and clears the test-only organizer allowlist. This repository does not indicate whether a specific deployment has enabled live payments. The included [service and privacy page](public/service.html) explains limits, payment verification, refund enquiries and data handling; self-hosting operators must adapt its support contact and descriptions to their own service.
+
+See [Stripe setup and payment verification](docs/BILLING.md) for configuration, test accounts, webhooks and operational limits.
 
 ## What counts as one vote
 

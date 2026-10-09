@@ -52,8 +52,9 @@ function trialConfig(config) {
   const version = config?.ballotVersion ?? "legacy";
   const options = config?.options;
   const maxChoices = config?.maxChoices === undefined ? 1 : config.maxChoices;
+  const maxHours = config?.entitlement?.kind === "paid-credit" ? 168 : MAX_HOURS;
   if (!Number.isSafeInteger(voteLimit) || voteLimit < 1 || voteLimit > MAX_VOTES ||
-      !Number.isSafeInteger(maxDurationHours) || maxDurationHours < 1 || maxDurationHours > MAX_HOURS ||
+      !Number.isSafeInteger(maxDurationHours) || maxDurationHours < 1 || maxDurationHours > maxHours ||
       !Number.isSafeInteger(opensAt) || !Number.isSafeInteger(closesAt) || closesAt <= opensAt ||
       closesAt - opensAt > maxDurationHours * 3_600_000 ||
       (config.lifecycle !== undefined && !["draft", "published"].includes(config.lifecycle)) ||

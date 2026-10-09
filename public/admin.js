@@ -1,5 +1,6 @@
 import { mountEventShare } from "./share.js";
 import { createOnboarding } from "./onboarding.js?v=20261009-onboarding";
+import { createBilling } from "./billing.js?v=20261009-billing";
 
 const $ = (id) => document.getElementById(id);
 const roleLabels = { owner: "擁有人", admin: "管理員 · 全部活動", organizer: "活動管理員" };
@@ -20,6 +21,11 @@ let pendingCreation = null;
 const pendingCreationKey = "wevote-pending-event";
 let onboardingReady = false;
 const onboarding = createOnboarding({ getSteps: onboardingSteps, storagePrefix: "wevote-guide:v1:" });
+const billing = createBilling({ api, getContext: () => ({ principal, quota: creationQuota, version: sessionVersion, creationBusy, pendingCreation: Boolean(pendingCreation) }),
+  onResponse: async (data) => { await adoptResponsePrincipal(data); },
+  onCredited: async () => { await loadEvents(); },
+  focusCreate: () => { $("event-name").scrollIntoView({ behavior: "smooth", block: "center" }); $("event-name").focus({ preventScroll: true }); },
+});
 
 function onboardingContext() {
   if (!principal) return "login";
@@ -39,23 +45,24 @@ function onboardingSteps() {
     body: "主辦方用可用嘅登入方式或管理員密鑰登入，就可以管理活動。參加者只需要活動連結或 QR code，毋須登入。",
   }];
   const limited = creationQuota?.limit === 1;
-  const used = limited && creationQuota.used === 1;
+  const used = limited && !creationQuota.canCreate;
   const unavailable = !creationQuota;
   const firstEvent = $("events-list").querySelector(".event-item");
   const steps = [];
-  if (used || unavailable) {
+  if (pendingCreation) {
+    steps.push({ target: $("retry-create-button"), title: "先確認上次建立結果。", body: "上次提交未確認完成。請用「重試建立同一活動」核對結果，系統會沿用已儲存嘅內容，避免重複建立同重複使用活動額度。" });
+  } else if (used || unavailable) {
     steps.push({ target: $("creation-quota"), title: used ? "繼續管理已有活動。" : "先確認活動配額。", body: used
       ? "免費活動額度已使用。你仍然可以編輯、發佈、分享同查看已有活動；儲存草稿亦計入一個活動嘅配額。"
       : "暫時未能確認活動配額，請重新整理或稍後再試。導覽唔會建立活動，亦唔會更改你已填嘅內容。" });
-  } else if (pendingCreation) {
-    steps.push({ target: $("retry-create-button"), title: "先確認上次建立結果。", body: "上次提交未確認完成。請用「重試建立同一活動」核對結果，系統會沿用已儲存嘅內容，避免重複建立。" });
   } else {
     steps.push({ target: $("event-name"), title: "寫低題目同選項。", body: limited
-      ? "免費試用可建立一個活動，最多 10,000 張有效投票，投票期間最長 24 小時。先準備活動名稱、問題同 2–20 個選項；草稿亦會使用活動額度。"
+      ? `${creationQuota.used === 0 ? "先使用免費試用活動。" : "建立活動會使用 1 個已購額度。"}先準備活動名稱、問題同 2–20 個選項；投票上限同期間以本頁配額資料為準，草稿亦會使用額度。`
       : "填活動名稱、投票問題同 2–20 個選項。團隊管理帳戶可以建立多個活動，每場都會有自己嘅連結。" });
     steps.push({ target: $("event-selection-mode"), title: "揀單選，或者多選。", body: "單選每張投票揀一項；多選可以設定每張最多揀幾項。每張成功提交嘅投票只計一次，免費試用嘅 10,000 張額度亦以投票張數計算。活動開始後投票方式會鎖定。" });
     steps.push({ target: $("closes-at"), title: "設定時間同結果公開方式。", body: "開始／截止時間用香港時間。可以先儲存草稿核對內容，再發佈；結果可即時公開，或截止後先公開。導覽只作介紹，唔會幫你提交活動。" });
   }
+  if (!$("billing-panel").hidden) steps.push({ target: $("billing-panel"), title: "需要再開活動？", body: "免費活動用完後，可以按本頁顯示嘅價格另購活動額度，喺 Stripe 安全結帳。返回頁面後先核對付款結果，確認額度入帳先建立新活動；管理員毋須購買額度。" });
   steps.push({ target: firstEvent?.querySelector(".event-share") || $("events-title"), title: "分享同一條連結或 QR code。", body: "建立後，呢度會列出你可管理嘅活動。可以複製連結、下載 QR 圖，或開啟社交分享；Instagram 可用下載嘅 QR 圖發佈 Story。草稿連結只供預覽，發佈後先接受投票。" });
   steps.push({ target: firstEvent?.querySelector(".event-tools") || $("events-title"), title: "睇即時結果，帶走報告。", body: "每場活動嘅「結果／CSV／PDF 報告」會開啟 dashboard；投票期間約每 1 秒查詢更新，公開內容跟活動設定。可下載票數摘要或列印報告，逐票 CSV 喺截止後提供。" });
   if (principal.role === "owner") steps.push({ target: $("accounts-title"), title: "分配畀團隊一齊管理。", body: "擁有人可新增團隊帳戶、設定權限，再喺活動內分配管理員。個人管理密鑰要私下交畀相關人士；唔好放喺公開投票連結。" });
@@ -95,6 +102,7 @@ function clearAccountKey() {
 
 function clearSession() {
   onboarding.dismiss();
+  billing.reset();
   sessionVersion++;
   pendingRequests.forEach((controller) => controller.abort());
   pendingRequests.clear();
@@ -150,6 +158,9 @@ async function api(path, options = {}) {
       error.code = data.code;
       error.creationQuota = data.creationQuota;
       error.principal = data.principal;
+      // Billing failures can include a durable terminal checkout state. Keep
+      // that overview so the billing UI can safely retire its old request ID.
+      error.billingOverview = path.startsWith("/api/admin/billing") ? data : null;
       throw error;
     }
     return data;
@@ -166,7 +177,7 @@ function clearPendingCreation() {
 }
 
 function rememberPendingCreation(payload) {
-  pendingCreation = { accountId: principal.id, requestId: crypto.randomUUID(), payload: JSON.stringify(payload) };
+  pendingCreation = { accountId: principal.id, requestId: crypto.randomUUID(), payload: JSON.stringify(payload), kind: creationQuota?.nextEvent?.kind || "free-trial" };
   try { sessionStorage.setItem(pendingCreationKey, JSON.stringify(pendingCreation)); } catch { /* Retry still works in memory. */ }
 }
 
@@ -207,28 +218,42 @@ function restorePendingCreation() {
 function syncCreateAvailability() {
   const limited = creationQuota?.limit === 1;
   const used = limited && creationQuota.used >= 1;
+  const exhausted = limited && !creationQuota.canCreate;
   const unknown = principal?.selfRegistered === true && principal.role === "organizer" && !creationQuota;
   const retry = Boolean(pendingCreation && limited);
-  $("create-fields").disabled = !principal || creationBusy || retry || used || unknown;
-  $("create-button").disabled = !principal || creationBusy || used || unknown;
+  $("create-fields").disabled = !principal || creationBusy || retry || exhausted || unknown;
+  $("create-button").disabled = !principal || creationBusy || exhausted || unknown;
   $("create-button").hidden = retry;
   $("retry-create-button").hidden = !retry;
   $("retry-create-button").disabled = !principal || creationBusy;
   $("event-form").setAttribute("aria-busy", String(creationBusy));
   $("creation-quota").hidden = !limited && !unknown;
   $("quota-event-link").hidden = !used;
+  billing.update();
   if (!limited && !unknown) return;
-  $("creation-quota-title").textContent = unknown ? "正在確認免費試用配額…" : used ? "免費活動配額已使用 · 1 / 1" : "免費試用 · 可建立 1 個活動";
+  const policy = creationQuota?.nextEvent;
+  $("creation-quota-title").textContent = unknown ? "正在確認活動配額…" : used ? `免費活動已使用 · 另購額度 ${creationQuota.paidCredits} 個` : "免費試用 · 可建立 1 個活動";
   $("creation-quota-message").textContent = used
-    ? "你仍然可以編輯、發佈同分享已有活動。每個帳戶只有一個免費活動，儲存草稿亦計入配額。"
+    ? policy ? `建立新活動會使用 1 個已購額度，最多 ${policy.voteLimit.toLocaleString("zh-HK")} 張有效投票，投票期間最長 ${policy.maxDurationHours / 24} 日。儲存草稿亦會使用額度；免費活動配額唔會重置。`
+      : "你仍然可以編輯、發佈同分享已有活動。每個帳戶只有一個免費活動；可用購買選項會喺下方顯示。"
     : "最多 10,000 張有效投票，投票期間最長 24 小時。儲存草稿亦會使用活動配額。";
 }
 
 function setCreationQuota(value) {
-  creationQuota = value?.limit === 1 && [0, 1].includes(value.used)
-    ? { limit: 1, used: value.used, eventId: value.eventId || null }
-    : value?.limit === null || !principal?.selfRegistered || principal.role !== "organizer"
-      ? { limit: null, used: 0, eventId: null } : null;
+  creationQuota = null;
+  if (value?.limit === 1 && [0, 1].includes(value.used)) {
+    const paidCredits = value.paidCredits ?? 0;
+    const remaining = 1 - value.used + paidCredits;
+    const next = value.nextEvent ?? (value.used === 0 ? { kind: "free-trial", voteLimit: 10_000, maxDurationHours: 24 } : null);
+    const validNext = next && next.kind === (value.used === 0 ? "free-trial" : "paid-credit") && Number.isSafeInteger(next.voteLimit) && next.voteLimit > 0 && next.voteLimit <= 10_000
+      && Number.isSafeInteger(next.maxDurationHours) && next.maxDurationHours > 0 && next.maxDurationHours <= 2160;
+    if (Number.isSafeInteger(paidCredits) && paidCredits >= 0 && Number.isSafeInteger(remaining) && (value.remaining === undefined || value.remaining === remaining)) {
+      creationQuota = { limit: 1, used: value.used, eventId: value.eventId || null, paidCredits, remaining,
+        canCreate: remaining > 0 && Boolean(validNext) && value.canCreate !== false, nextEvent: validNext ? next : null };
+    }
+  } else if (value?.limit === null || !principal?.selfRegistered || principal.role !== "organizer") {
+    creationQuota = { limit: null, used: 0, eventId: null, paidCredits: 0, remaining: null, canCreate: true, nextEvent: null };
+  }
   syncCreateAvailability();
 }
 
@@ -690,11 +715,12 @@ async function loadEvents() {
     else byId.set(id, event);
   }
   renderEvents([...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
-  if (pendingCreation && creationQuota?.used === 1 && byId.has(creationQuota.eventId)) {
+  const reservation = Array.isArray(data.creationReservations) && pendingCreation ? data.creationReservations.find(item => item.requestId === pendingCreation.requestId && byId.has(item.eventId)) : null;
+  if (reservation) {
     clearPendingCreation();
     $("event-form").reset();
     resetEventTimes();
-    note("create-message", "你嘅免費活動已喺下方列出，可以繼續管理。", "good");
+    note("create-message", "上次建立嘅同一活動已喺下方列出，可以繼續管理。", "good");
   }
   note("events-message", data.hasMore ? "活動數量較多，目前只顯示部分活動。" : "");
   showOnboarding(true);
@@ -705,7 +731,7 @@ function setPrincipal(value, quota) {
   $("current-user-name").textContent = value.name;
   $("accounts-panel").hidden = value.role !== "owner";
   setCreationQuota(quota);
-  $("current-user-role").textContent = value.role === "organizer" && creationQuota?.limit === 1 ? "主辦方 · 免費試用" : roleLabels[value.role] || "管理帳戶";
+  $("current-user-role").textContent = value.role === "organizer" && creationQuota?.limit === 1 ? "主辦方" : roleLabels[value.role] || "管理帳戶";
   restorePendingCreation();
 }
 
@@ -728,6 +754,7 @@ async function adoptResponsePrincipal(data, creating = false) {
     try { await loadAccounts(); }
     catch (error) { if (!cancelled(error) && !stale(version)) note("accounts-message", error.message, "bad"); }
   }
+  if (changed && principal) void billing.refresh();
   return principal && !stale(version) ? version : null;
 }
 
@@ -816,6 +843,7 @@ async function openDashboard(value, quota) {
     try { await loadEvents(); }
     catch (error) { if (!cancelled(error)) note("events-message", error.message, "bad"); }
   }
+  if (principal) await billing.refresh();
   showOnboarding(true);
 }
 
@@ -871,14 +899,14 @@ async function submitEvent() {
     if (pendingCreation) {
       payload = JSON.parse(pendingCreation.payload);
     } else {
-      if (!creationQuota || (creationQuota.limit === 1 && creationQuota.used >= 1)) return;
+      if (!creationQuota || !creationQuota.canCreate) return;
       const options = optionLabels($("event-options").value);
       if (options.length < 2 || options.length > 20) throw new Error("請填 2–20 個選項，每行一項。");
       const lifecycle = $("save-draft").checked ? "draft" : "published";
       const opensAt = $("open-now").checked && lifecycle === "published" ? new Date().toISOString() : hkTime($("opens-at").value);
       const closesAt = hkTime($("closes-at").value);
       if (Date.parse(closesAt) <= Date.parse(opensAt)) throw new Error("截止時間必須遲過開始時間。");
-      if (creationQuota.limit === 1 && Date.parse(closesAt) - Date.parse(opensAt) > 86400_000) throw new Error("免費活動嘅投票期間最長 24 小時，請調整截止時間。");
+      if (creationQuota.limit === 1 && Date.parse(closesAt) - Date.parse(opensAt) > creationQuota.nextEvent.maxDurationHours * 3600_000) throw new Error(`呢個活動額度嘅投票期間最長 ${creationQuota.nextEvent.maxDurationHours} 小時，請調整截止時間。`);
       payload = {
         name: $("event-name").value, question: $("event-question").value, options, opensAt, closesAt,
         resultsVisibility: $("results-visibility").value, lifecycle, maxChoices: readMaxChoices($("event-selection-mode"), $("event-max-choices"), options.length),
@@ -902,13 +930,14 @@ async function submitEvent() {
     version = responseVersion;
     if (!data.event || !/^[a-f0-9]{24}$/.test(data.event.id)) throw new Error("未能確認活動建立結果。");
     clearPendingCreation();
-    setCreationQuota(data.creationQuota || (creationQuota?.limit === 1 ? { limit: 1, used: 1, eventId: data.event.id } : { limit: null, used: 0, eventId: null }));
+    setCreationQuota(data.creationQuota || null);
     publicBaseUrl = data.publicBaseUrl || location.origin;
     justCreated.set(data.event.id, data.event);
     renderEvents([data.event, ...knownEvents.filter((item) => item.id !== data.event.id)]);
     $("event-form").reset();
     resetEventTimes();
     note("create-message", payload.lifecycle === "draft" ? "草稿已儲存。連結只供預覽，發佈前唔接受投票；核對內容同預定時間後再發佈。" : data.catalogPending ? "活動已建立，可以分享。活動列表索引暫時延遲，系統會自動重試。" : "活動已建立。請先打開分享連結核對內容，再派 QR code。", "good");
+    void billing.refresh();
   } catch (error) {
     if (stale(version)) return;
     const responseVersion = await adoptResponsePrincipal(error, true);
@@ -920,7 +949,7 @@ async function submitEvent() {
       note("create-message", error.message, "bad");
       if (error.code === "creation_quota_exhausted") {
         try { await loadEvents(); }
-        catch (refreshError) { if (!cancelled(refreshError) && !stale(version)) note("events-message", "請重新整理活動，查看已使用嘅免費活動。", "bad"); }
+        catch (refreshError) { if (!cancelled(refreshError) && !stale(version)) note("events-message", "請重新整理活動，查看已建立嘅活動。", "bad"); }
       }
     } else if (pendingCreation) {
       note("create-message", error.code === "idempotency_conflict"

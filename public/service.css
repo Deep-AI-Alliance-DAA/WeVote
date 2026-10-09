@@ -1,0 +1,48 @@
+.service-shell { max-width: 1100px; }
+.service-intro { padding: 60px 0 37px; }
+.service-intro .hero-kicker { margin-bottom: 20px; font-size: 11px; }
+.service-intro h1 { font-size: clamp(30px, 4vw, 45px); line-height: 1.4; letter-spacing: -.045em; }
+.service-intro > p:not(.hero-kicker) { max-width: 680px; color: #627584; font-size: 14px; line-height: 1.85; margin: 18px 0 0; }
+.service-intro > .service-updated { font-size: 11px !important; color: #778b96 !important; }
+.service-layout { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 42px; align-items: start; }
+.service-index { position: sticky; top: 28px; display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 14px 0; border-top: 1px solid #ccd9dc; }
+.service-index a { display: block; padding: 10px 0; color: #516e7b; font-size: 12px; line-height: 1.5; }
+.service-index a:hover { color: #214760; text-decoration: underline; text-underline-offset: 4px; }
+.service-content { min-width: 0; }
+.service-section { padding: 30px 0; border-top: 1px solid #d5dfe2; scroll-margin-top: 24px; }
+.service-section h2 { font-size: 24px; line-height: 1.5; margin: 12px 0 19px; }
+.service-section p, .service-data { color: #546d7c; font-size: 14px; line-height: 1.95; margin: 15px 0; }
+.service-section strong { color: #27485c; font-weight: 650; }
+.service-section p a, .service-data a { color: #2d647c; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.service-limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 23px 0; }
+.service-limits > div { border: 1px solid #d4dfe1; border-radius: 8px 10px 9px 8px; padding: 17px 18px; background: #edf3f2; }
+.service-limits dt { color: #617d84; font-size: 11px; }
+.service-limits dd { color: #214760; font-size: 27px; font-weight: 700; margin: 8px 0 0; white-space: nowrap; }
+.service-limits dd span { color: #587480; display: block; font-size: 12px; font-weight: 500; margin-top: 3px; }
+.service-section .service-note { font-size: 12px; color: #637e85; }
+.service-data { padding-left: 21px; }
+.service-data li { margin-bottom: 14px; padding-left: 4px; }
+.service-provider-links { display: flex; gap: 11px 22px; flex-wrap: wrap; font-size: 11px !important; padding-top: 8px; }
+.service-support { margin-top: 17px; padding: 27px 28px; background: #eaf0ef; border: 1px solid #ccdada; border-radius: 10px 12px 9px 11px; }
+.service-email { display: inline-flex; flex-wrap: wrap; gap: 15px; color: #214760; font-size: 16px; font-weight: 650; line-height: 1.6; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 5px; }
+.service-support p { margin: 14px 0; }
+@media (max-width: 850px) {
+  .service-layout { grid-template-columns: 1fr; gap: 5px; }
+  .service-index { position: static; flex-direction: row; flex-wrap: wrap; gap: 0 22px; }
+  .service-index a { padding: 8px 0; }
+  .service-intro { padding-top: 40px; padding-bottom: 26px; }
+}
+@media (max-width: 500px) {
+  .service-shell { padding: 0 21px; }
+  .service-shell .home-header { gap: 10px; }
+  .service-shell .home-header nav { gap: 12px; font-size: 10px; }
+  .service-shell .nav-admin { padding: 9px 10px; gap: 7px; }
+  .service-intro h1 { font-size: 30px; }
+  .service-section { padding: 26px 0; }
+  .service-section h2 { font-size: 22px; }
+  .service-limits { gap: 7px; }
+  .service-limits > div { padding: 15px 11px; }
+  .service-limits dd { font-size: 24px; }
+  .service-support { padding: 23px 20px; }
+  .service-email { font-size: 14px; gap: 7px; }
+}

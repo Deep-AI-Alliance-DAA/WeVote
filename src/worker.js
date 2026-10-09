@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { oauthAvailability, startOrganizerOAuth, finishOrganizerOAuth } from "./organizer-auth.js";
 import { initTrialBallot, recordTrialVote, readTrialResults, exportTrialVotes, normalizeOptionIds, storedOptionIds, exportVoteRow } from "./trial-ballot.js";
+import { BillingError, billingOverview, createBillingCheckout, reconcileBillingCheckout, handleBillingWebhook } from "./billing.js";
 export { AdminDirectory } from "./admin-directory.js";
 
 const SHARDS = 128;
@@ -45,6 +46,10 @@ function settings(env) {
 
 function timestamp(value) {
   return typeof value === "number" ? value : Date.parse(value);
+}
+
+function boundedEventHours(config) {
+  return config?.entitlement?.kind === "paid-credit" ? 168 : TRIAL.maxDurationHours;
 }
 
 function phase(config, now = Date.now()) {
@@ -317,6 +322,7 @@ async function eventResults(request, env, id) {
     resultsVisibility: tally.resultsVisibility,
     presentation: tally.presentation,
     trial: config.trial || null,
+    entitlement: config.entitlement?.kind === "paid-credit" ? { kind: "paid-credit" } : null,
     counts: state === "closed" || (state === "open" && tally.resultsVisibility === "live") ? tally.counts : null,
     turnstileSiteKey: env.TURNSTILE_SITE_KEY,
     updatedAt: tally.updatedAt,
@@ -377,17 +383,19 @@ async function adminEvents(request, env) {
   if (!creationQuota) throw new RequestError("登入狀態已失效，請重新登入。", 401);
   if (request.method === "GET") {
     if (principal.selfRegistered && principal.role === "organizer") {
-      const reserved = await directory(env).getReservedEvent(principal.id);
-      if (reserved && !await eventConfig(env, reserved.id)) {
-        await coordinator(env, reserved.id).initialize(reserved);
-        await coordinator(env, reserved.id).publishCatalog();
-        eventConfigs.delete(reserved.id);
-      }
+      const reservations = await directory(env).getCreationReservations(principal.id);
+      await Promise.all(reservations.map(async ({ event: reserved }) => {
+        if (reserved && !await eventConfig(env, reserved.id)) {
+          await coordinator(env, reserved.id).initialize(reserved);
+          await coordinator(env, reserved.id).publishCatalog();
+          eventConfigs.delete(reserved.id);
+        }
+      }));
       const ids = new Set(await directory(env).permittedEvents(principal.id));
-      if (creationQuota?.eventId) ids.add(creationQuota.eventId);
+      for (const reservation of reservations) ids.add(reservation.eventId);
       const events = (await Promise.all([...ids].map((id) => eventConfig(env, id))))
         .filter(Boolean).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      return json({ events, principal, creationQuota, hasMore: false, publicBaseUrl: env.PUBLIC_BASE_URL || new URL(request.url).origin });
+      return json({ events, principal, creationQuota, creationReservations: reservations.map(({ requestId, eventId }) => ({ requestId, eventId })), hasMore: false, publicBaseUrl: env.PUBLIC_BASE_URL || new URL(request.url).origin });
     }
     const list = await env.EVENTS.list({ prefix: "event:", limit: 1000 });
     const permitted = principal.role === "organizer" ? new Set(await directory(env).permittedEvents(principal.id)) : null;
@@ -413,8 +421,10 @@ async function adminEvents(request, env) {
     return result?.error === "idempotency_conflict"
       ? json({ error: "重試內容同原本請求唔一致，請重新整理活動列表。", code: "idempotency_conflict", principal, creationQuota: currentQuota }, 409)
       : result?.error === "quota_exceeded"
-        ? json({ error: "免費帳戶最多建立一個活動；可以繼續管理原有活動。", code: "creation_quota_exhausted", principal, creationQuota: currentQuota }, 409)
-        : json({ error: "登入狀態已失效。" }, 401);
+        ? json({ error: "免費活動額度已用完；購買額度後可以建立新活動。", code: "creation_quota_exhausted", principal, creationQuota: currentQuota }, 409)
+        : result?.error === "duration_exceeded"
+          ? json({ error: "投票時間超出呢個活動方案嘅上限。", principal, creationQuota: currentQuota }, 400)
+          : json({ error: "登入狀態已失效。" }, 401);
   };
   if (limited) {
     requestId = request.headers.get("Idempotency-Key") || "";
@@ -423,12 +433,12 @@ async function adminEvents(request, env) {
     const previous = await directory(env).lookupSelfRegisteredEvent(principal.id, { requestId, payloadHash });
     if (previous?.error) return reservationError(previous);
     if (previous?.eventId) {
-      const saved = await directory(env).getReservedEvent(principal.id);
+      const saved = await directory(env).getReservedEvent(principal.id, requestId);
       const object = coordinator(env, previous.eventId);
       const event = await object.initialize(saved);
       const catalogPending = !await object.publishCatalog();
       eventConfigs.delete(previous.eventId);
-      return json({ event, principal, catalogPending, replayed: true, creationQuota: await directory(env).getCreationQuota(principal.id), publicBaseUrl: env.PUBLIC_BASE_URL || new URL(request.url).origin }, 201);
+      return json({ event, principal, requestId, catalogPending, replayed: true, creationQuota: await directory(env).getCreationQuota(principal.id), publicBaseUrl: env.PUBLIC_BASE_URL || new URL(request.url).origin }, 201);
     }
   }
   const name = typeof input?.name === "string" ? input.name.trim() : "";
@@ -447,7 +457,8 @@ async function adminEvents(request, env) {
       !Number.isSafeInteger(maxChoices) || maxChoices < 1 || maxChoices > labels.length ||
       !Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= Math.max(opensAt, Date.now()) ||
       closesAt - opensAt > 90 * 86400_000) return json({ error: "請檢查活動名稱、題目、選項同時間。" }, 400);
-  if (limited && closesAt - opensAt > TRIAL.maxDurationHours * 3600_000) return json({ error: "免費試用活動嘅投票期最多 24 小時。" }, 400);
+  const maxDurationHours = limited ? creationQuota.nextEvent?.maxDurationHours || TRIAL.maxDurationHours : null;
+  if (limited && closesAt - opensAt > maxDurationHours * 3600_000) return json({ error: `呢個活動方案嘅投票期最多 ${maxDurationHours} 小時。` }, 400);
   const id = randomHex(12);
   let event = {
     id, name, question, ownerId: principal.id, ballotVersion: randomHex(8), lifecycle, resultsVisibility, presentation, maxChoices,
@@ -456,13 +467,14 @@ async function adminEvents(request, env) {
     closesAt: new Date(closesAt).toISOString(),
     createdAt: new Date().toISOString(),
     mode: "public-link",
-    ...(limited ? { trial: { voteLimit: TRIAL.voteLimit, maxDurationHours: TRIAL.maxDurationHours } } : {}),
+    ...(limited ? { trial: { voteLimit: TRIAL.voteLimit, maxDurationHours },
+      ...(creationQuota.nextEvent?.kind === "paid-credit" ? { entitlement: { kind: "paid-credit" } } : {}) } : {}),
   };
   if (limited) {
     if (encoder.encode(JSON.stringify(event)).byteLength > 8192) return json({ error: "活動內容太長，請縮短描述或圖片網址。" }, 400);
     const reservation = await directory(env).reserveSelfRegisteredEvent(principal.id, { requestId, payloadHash, eventId: id, event });
     if (reservation?.error) return reservationError(reservation);
-    const reserved = await directory(env).getReservedEvent(principal.id);
+    const reserved = await directory(env).getReservedEvent(principal.id, requestId);
     // A concurrent promotion to admin bypasses the public reservation.
     if (reserved?.id === reservation.eventId) event = reserved;
     else if ((await directory(env).getCreationQuota(principal.id))?.limit !== null) throw new Error("Event reservation unavailable.");
@@ -470,7 +482,26 @@ async function adminEvents(request, env) {
   const object = coordinator(env, event.id);
   event = await object.initialize(event);
   const catalogPending = !await object.publishCatalog();
-  return json({ event, principal, catalogPending, creationQuota: await directory(env).getCreationQuota(principal.id), publicBaseUrl: env.PUBLIC_BASE_URL || new URL(request.url).origin }, 201);
+  return json({ event, principal, ...(requestId ? { requestId } : {}), catalogPending, creationQuota: await directory(env).getCreationQuota(principal.id), publicBaseUrl: env.PUBLIC_BASE_URL || new URL(request.url).origin }, 201);
+}
+
+async function adminBilling(request, env, action) {
+  const principal = await requireAdmin(request, env);
+  const object = directory(env);
+  try {
+    if (!action) return request.method === "GET" ? json(await billingOverview(env, object, principal)) : json({ principal, error: "方法無效。" }, 405);
+    if (request.method !== "POST") return json({ principal, error: "方法無效。" }, 405);
+    requireJson(request);
+    const input = await readJson(request);
+    if (action === "checkout") {
+      if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length) return json({ principal, error: "付款方案由伺服器設定。" }, 400);
+      return json(await createBillingCheckout(env, object, principal, request.headers.get("Idempotency-Key")));
+    }
+    return json(await reconcileBillingCheckout(env, object, principal, input));
+  } catch (error) {
+    if (error instanceof BillingError || error instanceof RequestError) return json({ ...await billingOverview(env, object, principal), error: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
+    throw error;
+  }
 }
 
 async function vote(request, env) {
@@ -662,7 +693,7 @@ async function adminEventDetail(request, env, id, action = "content") {
     const opensAt = Date.parse(input.opensAt ?? config.opensAt);
     const closesAt = Date.parse(input.closesAt ?? config.closesAt);
     if (!Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= Math.max(opensAt, Date.now()) || closesAt - opensAt > 90 * 86400_000) return json({ error: "請檢查投票開始及結束時間。" }, 400);
-    if (config.trial && closesAt - opensAt > TRIAL.maxDurationHours * 3600_000) return json({ error: "免費試用活動嘅投票期最多 24 小時。" }, 400);
+    if (config.trial && closesAt - opensAt > boundedEventHours(config) * 3600_000) return json({ error: `呢個活動方案嘅投票期最多 ${boundedEventHours(config)} 小時。` }, 400);
     update.opensAt = new Date(opensAt).toISOString();
     update.closesAt = new Date(closesAt).toISOString();
   }
@@ -710,6 +741,9 @@ export default {
       const socialAuth = /^\/api\/auth\/(google|apple)\/(start|callback)$/.exec(url.pathname);
       if (socialAuth) return await organizerAuth(request, env, socialAuth[1], socialAuth[2]);
       if (url.pathname.startsWith("/api/admin/")) checkAdminOrigin(request);
+      if (url.pathname === "/api/billing/webhook") return request.method === "POST" ? json(await handleBillingWebhook(request, env, directory(env))) : json({ error: "方法無效。" }, 405);
+      const billingRoute = /^\/api\/admin\/billing(?:\/(checkout|reconcile))?$/.exec(url.pathname);
+      if (billingRoute) return await adminBilling(request, env, billingRoute[1]);
       const authRoute = /^\/api\/admin\/(login|logout|me)$/.exec(url.pathname);
       if (authRoute) return await adminAuth(request, env, authRoute[1]);
       if (url.pathname === "/api/admin/accounts") return await adminAccounts(request, env);
@@ -733,7 +767,7 @@ export default {
       if (url.pathname === "/api/admin/export") return request.method === "GET" ? await exportShard(request, env) : json({ error: "方法無效。" }, 405);
       return json({ error: "找不到頁面。" }, 404);
     } catch (error) {
-      if (error instanceof RequestError) return json({ error: error.message }, error.status);
+      if (error instanceof RequestError || error instanceof BillingError) return json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
       console.error(JSON.stringify({ event: "request_failed", message: error instanceof Error ? error.message : "unknown" }));
       return json({ error: "系統暫時未能處理請求。" }, 503);
     }
@@ -777,7 +811,8 @@ export class EventCoordinator extends DurableObject {
     const { id, name, opensAt, closesAt, createdAt } = config;
     const { resultsVisibility } = this.displaySettings();
     try {
-      await this.env.EVENTS.put(`event:${id}`, JSON.stringify(config), { metadata: { id, name, opensAt, closesAt, createdAt, lifecycle: config.lifecycle || "published", ownerId: config.ownerId || "root", resultsVisibility, maxChoices: config.maxChoices ?? 1 } });
+      await this.env.EVENTS.put(`event:${id}`, JSON.stringify(config), { metadata: { id, name, opensAt, closesAt, createdAt, lifecycle: config.lifecycle || "published", ownerId: config.ownerId || "root", resultsVisibility, maxChoices: config.maxChoices ?? 1,
+        trial: config.trial || null, entitlement: config.entitlement?.kind === "paid-credit" ? { kind: "paid-credit" } : null } });
     } catch {
       console.error(JSON.stringify({ event: "event_catalog_retry", eventId: id }));
       await this.ctx.storage.setAlarm(Date.now() + 60_000);
@@ -812,7 +847,7 @@ export class EventCoordinator extends DurableObject {
     if ((update.opensAt !== undefined || update.closesAt !== undefined) && phase(config) !== "draft") return null;
     const event = { ...config, ...update };
     if (!Number.isSafeInteger(event.maxChoices ?? 1) || (event.maxChoices ?? 1) < 1 || (event.maxChoices ?? 1) > event.options.length) return null;
-    if (config.trial && timestamp(event.closesAt) - timestamp(event.opensAt) > TRIAL.maxDurationHours * 3600_000) return null;
+    if (config.trial && timestamp(event.closesAt) - timestamp(event.opensAt) > boundedEventHours(config) * 3600_000) return null;
     this.sql.exec("UPDATE event_config SET config_json = ? WHERE singleton = 1", JSON.stringify(event));
     this.snapshotValue = null;
     await this.ctx.storage.setAlarm(Date.now() + 5000);

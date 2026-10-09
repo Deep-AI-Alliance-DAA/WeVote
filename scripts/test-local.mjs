@@ -12,10 +12,10 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const allSuites = ["smoke-events.mjs", "smoke-admin.mjs", "smoke-drafts.mjs", "smoke-signup.mjs"];
+const allSuites = ["smoke-events.mjs", "smoke-admin.mjs", "smoke-drafts.mjs", "smoke-signup.mjs", "smoke-billing.mjs"];
 const argumentsList = process.argv.slice(2);
 if (argumentsList.length && (argumentsList.length !== 2 || argumentsList[0] !== "--suite" || !allSuites.includes(`smoke-${argumentsList[1]}.mjs`))) {
-  throw new Error("Usage: node scripts/test-local.mjs [--suite events|admin|drafts|signup]");
+  throw new Error("Usage: node scripts/test-local.mjs [--suite events|admin|drafts|signup|billing]");
 }
 const suites = argumentsList.length ? [`smoke-${argumentsList[1]}.mjs`] : allSuites;
 const abort = new AbortController();
@@ -58,6 +58,17 @@ export default {
         requestId: input.requestId, payloadHash: await fingerprint(input.input), eventId: input.event.id, event: input.event,
       });
       return json(result);
+    }
+    if (url.pathname === "/api/__local_test__/seed-paid-credit") {
+      if (!/^[a-f0-9]{24}$/.test(input.accountId || "") || !/^[a-f0-9-]{36}$/.test(input.requestId || "")) return json({ error: "Invalid credit fixture" }, 400);
+      const prepared = await directory.prepareBillingOrder(input.accountId, { requestId: input.requestId, orderId: crypto.randomUUID(),
+        priceId: "price_LocalDisposable", amountMinor: 9900, currency: "hkd", livemode: true,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600, origin: "https://billing.example.invalid" });
+      if (prepared.error) return json(prepared, 403);
+      const order = prepared.order;
+      const suffix = order.id.replaceAll("-", "");
+      await directory.fulfillBillingOrder({ orderId: order.id, sessionId: "cs_live_Local" + suffix, paymentIntent: "pi_Local" + suffix, livemode: true });
+      return json({ creationQuota: await directory.getCreationQuota(input.accountId) });
     }
     if (url.pathname === "/api/__local_test__/inspect-storage") {
       if (!/^[a-f0-9]{24}$/.test(input.eventId) || !Array.isArray(input.shardIndexes) || input.shardIndexes.length > 2 ||

@@ -9,10 +9,10 @@
     <title>WeVote — 活動管理</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="/admin.css?v=20261009-multiple-choices">
+    <link rel="stylesheet" href="/admin.css?v=20261009-billing">
     <link rel="stylesheet" href="/share.css">
     <link rel="stylesheet" href="/onboarding.css?v=20261009-onboarding">
-    <script type="module" src="/admin.js?v=20261009-multiple-choices"></script>
+    <script type="module" src="/admin.js?v=20261009-billing"></script>
   </head>
   <body>
     <div class="shell admin-shell">
@@ -54,6 +54,16 @@
               <h2 id="create-title">建立投票 event</h2>
               <p class="admin-muted">同一條公開 link／QR 可以畀所有人使用。可以先儲存草稿核對內容，發佈後先接受投票；活動開始後題目、選項同投票方式會鎖定。</p>
               <div id="creation-quota" class="creation-quota" role="status" aria-live="polite" hidden><strong id="creation-quota-title"></strong><p id="creation-quota-message"></p><a id="quota-event-link" href="#events-title" hidden>管理已有活動 <span aria-hidden="true">↓</span></a></div>
+              <section id="billing-panel" class="billing-panel" aria-labelledby="billing-title" hidden>
+                <div class="billing-heading"><h3 id="billing-title">再開一場活動</h3><span id="billing-test-label" class="billing-test-label" hidden>測試模式</span></div>
+                <p id="billing-balance"></p>
+                <p id="billing-offer" class="billing-offer" hidden></p>
+                <p id="billing-test-note" class="billing-note" hidden>測試結帳只供獲授權測試帳戶使用，唔會收取真實款項；測試額度同正式額度分開。</p>
+                <p class="billing-note">付款會喺 Stripe 嘅安全結帳頁完成。WeVote 唔會保存信用卡號碼。</p>
+                <p class="billing-note"><a href="/service.html">查看服務、付款、退款查詢及私隱說明 <span aria-hidden="true">↗</span></a></p>
+                <div class="billing-actions"><button id="billing-buy" class="small-button" type="button" hidden>前往 Stripe 安全結帳</button><button id="billing-resume" class="small-button" type="button" hidden>繼續同一結帳</button><button id="billing-use-credit" class="small-button" type="button" hidden>使用額度建立活動</button><button id="billing-check" class="small-button" type="button">檢查付款及額度</button></div>
+                <p id="billing-message" class="message" role="status" aria-live="polite"></p>
+              </section>
               <form id="event-form" class="event-form">
                 <fieldset id="create-fields" class="create-fields"><legend class="sr-only">新投票活動內容</legend>
                 <label for="event-name">活動名稱</label><input id="event-name" name="name" required maxlength="100" placeholder="例：年度會員大會">
@@ -73,7 +83,7 @@
                 <button class="primary-button" type="button" id="retry-create-button" hidden>重試建立同一活動 <span aria-hidden="true">↗</span></button>
               </form>
               <p id="create-message" class="message" role="status" aria-live="polite"></p>
-              <p class="admin-caveat">公開連結只可以盡量防重複：系統以瀏覽器識別同 Turnstile 驗證，但清除 cookie 或換裝置仍可能再投。正式結果如需「一人一票」，要改用每人獨立票據。</p>
+              <p class="admin-caveat">公開連結只可以盡量防重複：系統以瀏覽器識別同 Turnstile 驗證，但清除 cookie 或換裝置仍可能再投。獨立票據只保證每張票據最多提交一次，主辦方仍須核實資格及控制派票。</p>
             </section>
 
             <section class="card admin-card events-card" aria-labelledby="events-title">
@@ -87,7 +97,7 @@
           </div>
         </div>
       </main>
-      <footer>WeVote <span>·</span> Credits: <a href="https://daa.hk/">DAA.HK</a>, Hillman Tam and Keith Li</footer>
+      <footer>WeVote <span>·</span> Credits: <a href="https://daa.hk/">DAA.HK</a>, Hillman Tam and Keith Li <span>·</span> <a href="/service.html">服務及私隱說明</a></footer>
     </div>
   </body>
 </html>

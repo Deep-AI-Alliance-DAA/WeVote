@@ -7,7 +7,7 @@ import { Script } from "node:vm";
 const source = await readFile(new URL("../src/worker.js", import.meta.url), "utf8");
 const executable = source
   .replace(/^import \{ DurableObject \} from "cloudflare:workers";$/m, "class DurableObject {}")
-  .replace(/^import .* from "\.\/(?:organizer-auth|trial-ballot)\.js";$/gm, "")
+  .replace(/^import .* from "\.\/(?:organizer-auth|trial-ballot|billing)\.js";$/gm, "")
   .replace(/^export \{ AdminDirectory \} from "\.\/admin-directory\.js";$/m, "")
   .replace(/^export default /m, "const worker = ")
   .replace(/^export class /gm, "class ");

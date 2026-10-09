@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import vm from "node:vm";
 import { createLocalJWKSet, exportJWK, exportPKCS8, generateKeyPair, jwtVerify, SignJWT } from "jose";
 import { finishOrganizerOAuth, oauthAvailability, startOrganizerOAuth, verifyOrganizerIdentityToken } from "../src/organizer-auth.js";
+import { testOrganizerAuthRuntime } from "./test-organizer-auth-runtime.mjs";
 
 let checks = 0;
 function check(value, message) { assert.ok(value, message); checks++; }
@@ -67,10 +68,13 @@ let tokenRequests = 0;
 let lastAuthorization;
 let lastAppleSecretClaims;
 const originalFetch = globalThis.fetch;
+const originalWarn = console.warn;
+const diagnostics = [];
+console.warn = (...args) => diagnostics.push(args);
 globalThis.fetch = async (input, init = {}) => {
   const url = String(input);
   check(init.signal instanceof AbortSignal, "provider fetch has an abort signal");
-  equal(init.redirect, "error", "provider redirects are rejected");
+  equal(init.redirect, "manual", "provider redirects are handled explicitly on Workers");
   if (url.endsWith("/certs") || url.endsWith("/auth/keys")) return Response.json({ keys: [publicJwk] });
   if (!url.endsWith("/token")) throw new Error("Unexpected outbound request in offline test");
   tokenRequests++;
@@ -88,6 +92,7 @@ globalThis.fetch = async (input, init = {}) => {
     equal(form.get("code_verifier"), null, "Apple uses its documented confidential-client flow");
   }
   if (exchangeMode === "provider-error") return Response.json({ error: "PRIVATE_PROVIDER_MARKER" }, { status: 400 });
+  if (exchangeMode === "redirect") return new Response("PRIVATE_PROVIDER_MARKER", { status: 302, headers: { Location: "https://untrusted.example/token" } });
   if (exchangeMode === "oversized") return new Response("x".repeat(65_537));
   return Response.json({ id_token: await identityToken(provider, { nonce: exchangeMode === "wrong-nonce" ? "wrong" : activeFlow.nonce }) });
 };
@@ -169,6 +174,7 @@ try {
   await rejects(() => verifyOrganizerIdentityToken("google", wrongSignature, env.GOOGLE_CLIENT_ID, "expected-nonce", localKeys), "valid-looking claims signed by wrong key rejected");
   const badFlow = await start();
   equal((await finishOrganizerOAuth(callback(badFlow, "google", {}, ""), env, "google", authDirectory)).status, 400, "missing state cookie rejected");
+  equal(diagnostics.at(-1)[1].stage, "browser_state", "missing browser state has a static diagnostic stage");
   const stateSegments = badFlow.state.split(".");
   stateSegments[2] = (stateSegments[2].startsWith("a") ? "b" : "a") + stateSegments[2].slice(1);
   const tamperedState = stateSegments.join(".");
@@ -180,15 +186,26 @@ try {
   const duplicateFlow = await start();
   const duplicateRequest = callback(duplicateFlow);
   equal((await finishOrganizerOAuth(new Request(duplicateRequest.url + "&state=duplicate", { headers: duplicateRequest.headers }), env, "google", authDirectory)).status, 400, "duplicate callback parameters rejected");
-  for (const mode of ["wrong-nonce", "provider-error", "oversized"]) {
+  for (const mode of ["wrong-nonce", "provider-error", "oversized", "redirect"]) {
     exchangeMode = mode;
     const flow = await start();
     const result = await finishOrganizerOAuth(callback(flow), env, "google", authDirectory);
     equal(result.status, 400, `${mode} provider response rejected`);
+    equal(diagnostics.at(-1)[1].stage, mode === "wrong-nonce" ? "identity_verification" : "token_exchange", "provider failure identifies its safe processing stage");
     const text = await result.text();
     check(!text.includes("PRIVATE_PROVIDER_MARKER") && !text.includes("offline-code") && !text.includes(env.GOOGLE_CLIENT_SECRET), "callback errors do not leak provider data");
   }
   exchangeMode = "valid";
+  const diagnosticFlow = await start();
+  const untrustedError = new Error("PRIVATE_ERROR_MARKER " + diagnosticFlow.state + " " + env.GOOGLE_CLIENT_SECRET);
+  untrustedError.code = "PRIVATE_ERROR_CODE";
+  const failedDirectory = { ...authDirectory, async consumeOAuthFlow() { throw untrustedError; } };
+  equal((await finishOrganizerOAuth(callback(diagnosticFlow), env, "google", failedDirectory)).status, 400, "untrusted durable error fails safely");
+  equal(diagnostics.at(-1)[1].reason, "failed", "unknown exception codes are never logged");
+  equal(diagnostics.at(-1)[1].stage, "durable_flow", "durable flow failures can be diagnosed without the exception");
+  check(diagnostics.every(([message, value]) => message === "wevote_oauth_failure" && Object.keys(value).sort().join(",") === "provider,reason,stage"), "diagnostics contain only fixed operational fields");
+  const diagnosticText = JSON.stringify(diagnostics);
+  check(!["PRIVATE_ERROR_MARKER", "PRIVATE_ERROR_CODE", "PRIVATE_PROVIDER_MARKER", "offline-code", env.GOOGLE_CLIENT_SECRET, diagnosticFlow.state, "same@example.invalid", "same-subject-across-different-providers"].some((secret) => diagnosticText.includes(secret)), "diagnostics exclude provider data, codes, tokens, identities and credentials");
   const bodyFlow = await start("apple");
   equal((await finishOrganizerOAuth(new Request(`${env.PUBLIC_BASE_URL}/api/auth/apple/callback`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: bodyFlow.cookie }, body: "x=" + "x".repeat(16_385) }), env, "apple", authDirectory)).status, 400, "callback body size bounded");
   const invalidFlow = { stateHash: "a".repeat(64), provider: "google", nonce: "b".repeat(64), verifier: "c".repeat(64), redirectUri: "https://vote.example/api/auth/google/callback", expiresAt: Date.now() + 60_000 };
@@ -244,8 +261,11 @@ try {
   equal(directory.getCreationQuota(unusedPublic).used, 0, "oversized snapshot rolls back quota reservation");
   await rejects(() => directory.reserveSelfRegisteredEvent(appleResult.principal.id, { ...requestA, requestId: "short" }), "malformed idempotency key rejected");
   check(durableSyncs > 0, "mutations wait for durable storage");
+  globalThis.fetch = originalFetch;
+  checks += await testOrganizerAuthRuntime();
   console.log(`Organizer auth tests passed (${checks} checks). No real provider or production requests.`);
 } finally {
   globalThis.fetch = originalFetch;
+  console.warn = originalWarn;
   db.close();
 }

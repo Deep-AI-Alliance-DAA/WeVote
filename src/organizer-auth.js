@@ -57,6 +57,14 @@ function failure(message, status, provider) {
   return new Response(JSON.stringify({ error: message }), { status, headers });
 }
 
+function diagnose(provider, stage, error) {
+  const codes = new Set(["ERR_JWT_CLAIM_VALIDATION_FAILED", "ERR_JWT_EXPIRED", "ERR_JWS_SIGNATURE_VERIFICATION_FAILED", "ERR_JWKS_TIMEOUT", "ERR_JWKS_NO_MATCHING_KEY", "ERR_JWKS_INVALID", "ERR_JWK_INVALID", "ERR_JOSE_ALG_NOT_ALLOWED"]);
+  // Only these fixed classifications may reach logs. Never serialize the
+  // exception, callback, request URL, account identity or provider response.
+  const reason = codes.has(error?.code) ? error.code : error?.name === "TimeoutError" ? "provider_timeout" : error?.name === "AbortError" ? "provider_aborted" : "failed";
+  console.warn("wevote_oauth_failure", { provider, stage, reason });
+}
+
 function cancelled(origin, provider) {
   return new Response(null, { status: 303, headers: { Location: `${origin}/admin.html?auth_error=cancelled`, "Set-Cookie": flowCookie("", provider, 0), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
 }
@@ -89,7 +97,13 @@ async function readBoundedBody(body, maximum) {
 async function boundedProviderFetch(input, init = {}) {
   const timeout = AbortSignal.timeout(8000);
   const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-  const response = await fetch(input, { ...init, redirect: "error", signal });
+  // Workers implements only follow/manual. Check redirects explicitly so an
+  // authorization code or confidential client secret never follows a 3xx.
+  const response = await fetch(input, { ...init, redirect: "manual", signal });
+  if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel();
+    throw new Error("OAuth provider redirect rejected");
+  }
   const contentLength = Number(response.headers.get("Content-Length"));
   if (Number.isFinite(contentLength) && contentLength > 65_536) {
     await response.body?.cancel();
@@ -161,8 +175,12 @@ export async function finishOrganizerOAuth(request, env, provider, directory) {
   if (!validProvider(provider) || !oauthAvailability(env)[provider]) return failure("呢個登入方式尚未設定。", 503);
   if (request.method !== (provider === "google" ? "GET" : "POST")) return failure("方法無效。", 405, provider);
   const origin = canonicalOrigin(env);
-  if (new URL(request.url).origin !== origin || new URL(request.url).pathname !== `/api/auth/${provider}/callback`) return failure("登入回調網址不符。", 400, provider);
+  if (new URL(request.url).origin !== origin || new URL(request.url).pathname !== `/api/auth/${provider}/callback`) {
+    diagnose(provider, "callback_origin");
+    return failure("登入回調網址不符。", 400, provider);
+  }
   let input;
+  let stage = "callback_input";
   try {
     if (provider === "google") {
       if (request.url.length > 16_384) throw new Error("OAuth callback too large");
@@ -172,24 +190,35 @@ export async function finishOrganizerOAuth(request, env, provider, directory) {
       input = new URLSearchParams(new TextDecoder().decode(await readBoundedBody(request.body, 16_384)));
     }
     if (["state", "code", "error"].some((name) => input.getAll(name).length > 1)) throw new Error("OAuth callback duplicate fields");
+    stage = "browser_state";
     const state = input.get("state") || "";
     if (!state || state.length > 2048 || cookieValue(request) !== state) throw new Error("OAuth state mismatch");
+    stage = "state_signature";
     const { payload } = await jwtVerify(state, await stateKey(env), { issuer: "wevote-organizer-auth", audience: origin, subject: provider,
       algorithms: ["HS256"], typ: "wevote-oauth+jwt", maxTokenAge: "10m", requiredClaims: ["iat", "exp", "jti"] });
     if (payload.provider !== provider || typeof payload.jti !== "string" || !/^[a-f0-9]{64}$/.test(payload.jti)) throw new Error("OAuth state invalid");
+    stage = "durable_flow";
     const flow = await directory.consumeOAuthFlow(await hash(state), provider);
     if (!flow || flow.redirectUri !== `${origin}/api/auth/${provider}/callback`) throw new Error("OAuth flow expired");
     if (input.has("error")) return cancelled(origin, provider);
     const code = input.get("code") || "";
+    stage = "authorization_code";
     if (!code || code.length > 4096) throw new Error("OAuth code invalid");
+    stage = "token_exchange";
     const token = await exchangeCode(provider, code, flow, env);
+    stage = "identity_verification";
     const identity = await verifyOrganizerIdentityToken(provider, token, provider === "google" ? env.GOOGLE_CLIENT_ID : env.APPLE_SERVICE_ID, flow.nonce);
+    stage = "account_resolution";
     const principal = await directory.resolveOAuthAccount({ provider, subject: identity.subject, name: identity.name });
-    if (!principal) return failure("呢個帳戶暫時未能登入。", 403, provider);
+    if (!principal) {
+      diagnose(provider, stage);
+      return failure("呢個帳戶暫時未能登入。", 403, provider);
+    }
     return { principal, redirectTo: `${origin}/admin.html?auth=success`, clearCookie: flowCookie("", provider, 0) };
-  } catch {
+  } catch (error) {
     // Codes, identity tokens, secrets and provider response bodies must never
     // appear in application logs or browser errors.
+    diagnose(provider, stage, error);
     return failure("登入驗證失敗或已過期，請返回重新登入。", 400, provider);
   }
 }

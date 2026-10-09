@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 const source = dirname(fileURLToPath(import.meta.url));
 const fixture = await realpath(await mkdtemp(join(tmpdir(), "wevote-startup-test-")));
 const trace = join(fixture, "trace.jsonl");
-const suites = ["smoke-events.mjs", "smoke-admin.mjs", "smoke-drafts.mjs", "smoke-signup.mjs"];
+const suites = ["smoke-events.mjs", "smoke-admin.mjs", "smoke-drafts.mjs", "smoke-signup.mjs", "smoke-billing.mjs"];
 
 const wranglerStub = `
 import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";

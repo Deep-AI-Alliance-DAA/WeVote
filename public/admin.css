@@ -34,6 +34,19 @@
 .creation-quota > strong { font-size: 13px; }
 .creation-quota > p { margin: 6px 0 0; font-size: 12px; line-height: 1.75; }
 .creation-quota > a { display: inline-block; margin-top: 8px; color: #376a82; font-size: 12px; text-underline-offset: 3px; }
+.billing-panel { margin: 16px 0 0; padding: 17px 18px; border: 1px solid #d2dce3; border-radius: 8px; background: #f6f8fa; }
+.billing-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.billing-heading h3 { margin: 0; font-size: 14px; color: #284b60; }
+.billing-test-label { padding: 4px 7px; border-radius: 4px; background: #f7eacb; color: #765615; font-size: 11px; font-weight: 700; }
+.billing-panel > p { margin: 9px 0 0; font-size: 12px; line-height: 1.75; }
+.billing-panel .billing-offer { color: #284b60; font-weight: 650; }
+.billing-note { color: #657482; }
+.billing-note a { color: #376a82; text-decoration: underline; text-underline-offset: 3px; }
+.billing-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+.billing-actions > button { min-height: 44px; font-size: 12px; }
+.billing-actions > button:focus-visible { outline: 2px solid #376a82; outline-offset: 3px; }
+.billing-panel > .message { margin-top: 10px; }
+@media (max-width: 610px) { .billing-actions { flex-direction: column; align-items: stretch; } }
 .login-form label, .event-form label:not(.check-row) { color: #243d4e; font-size: 13px; font-weight: 700; }
 .event-form small { color: #82919b; font-weight: 500; }
 .login-form input, .event-form input:not([type=checkbox]), .event-form textarea { width: 100%; border: 1px solid #cbd7db; border-radius: 8px; padding: 12px 13px; background: #fbfcfb; color: #17283c; outline: none; }
