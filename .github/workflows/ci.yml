@@ -36,6 +36,8 @@ jobs:
         run: npm run test:cache
       - name: Check local and deployment setup
         run: npm run test:setup
+      - name: Check public and private asset builds
+        run: npm run test:assets
       - name: Check local Worker startup recovery
         run: npm run test:startup
       - name: Build Pages bundle

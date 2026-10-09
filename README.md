@@ -2,9 +2,13 @@
 
 Create an event, share one voting link or QR code, and display the results. WeVote is a self-hosted voting application with a professional hand-drawn interface, an event dashboard, and CSV/PDF report tools.
 
+**Project credits: [DAA.HK](https://daa.hk/), Hillman Tam and Keith Li.**
+
+**Hosted installation:** [vote.daa.hk](https://vote.daa.hk/), running on Cloudflare Pages and a private API Worker.
+
 [香港廣東話指南](docs/README.zh-HK.md) · [Deployment](docs/DEPLOYMENT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-**Release status:** this repository is currently private and being prepared for public release. The MIT license and these documents do not change repository visibility.
+The source is licensed under [MIT](LICENSE). This GitHub repository is currently private; access is managed by its owner.
 
 ## Features
 
@@ -78,6 +82,22 @@ npm run setup:cloudflare -- --help
 
 Follow [the deployment guide](docs/DEPLOYMENT.md) to create KV, supply the setup arguments, run `npm run deploy:api` and `npm run deploy:pages`, and attach your domain. The helper writes ignored `wrangler.worker.local.jsonc`, `.cloudflare/pages/wrangler.jsonc`, and a protected `.env.production.json`; it does not provision or deploy remote resources. Edit `.env.production.json` locally to add your real `TURNSTILE_SECRET_KEY` before deployment. Keep these files out of Git.
 
+### Event posters and private deployment assets
+
+Deployment-specific posters and organizer images belong in the ignored `private-assets/` directory. Create `private-assets/manifest.json` listing the images to include; for example:
+
+```json
+{ "version": 1, "files": ["event-poster.jpg"] }
+```
+
+Place each listed image in that directory, then explicitly include it when deploying:
+
+```bash
+npm run deploy:pages -- --with-private-assets
+```
+
+The normal public build contains the reusable project artwork. The explicit flag adds only the manifest's listed images to the hosted bundle. Set the event's cover-image URL to its deployed HTTPS address. Keep the manifest/images out of Git and obtain any required permission to host them; their rights are governed separately from the source license.
+
 ## Architecture
 
 ```text
@@ -105,10 +125,12 @@ The application stores hashed browser/ticket identifiers, choices, and timestamp
 
 Share only the event URL or QR code. Keep owner and account login keys private. Admin sessions use HttpOnly cookies and expire after eight hours; disabling a named account or rotating its key revokes its sessions. Rotating the owner key does not invalidate existing owner sessions; they remain valid until their eight-hour expiry. Use one canonical public hostname so voting cookies are consistent.
 
-## Credits and license
+## Credits, acknowledgements and license
 
-Credits: **[DAA.HK](https://daa.hk/), Hillman Tam and Keith Li**.
+The WeVote project credits are **[DAA.HK](https://daa.hk/), Hillman Tam and Keith Li**, as acknowledged by the project owner. The following acknowledgements explain the technical and visual references and the bundled third-party code:
 
-WeVote is licensed under the [MIT License](LICENSE). Retain its copyright and license notice when redistributing. The bundled QR generator's license is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **Technical inspiration:** [Keith Li's HK Traffic Intelligence](https://github.com/keithligh/hk-traffic-intelligence) documents serving shared, cached feed copies on Cloudflare and refreshing them at intervals. This informed WeVote's emphasis on shared caching and economical operation.
+- **QR generation:** `qrcode-generator` 2.0.4 by Kazuhiko Arase is bundled under MIT. Preserve the complete upstream notice in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **Visual inspiration:** [Streamline Freehand](https://www.streamlinehq.com/icons/freehand-sets) informed the hand-drawn direction. WeVote's AI-assisted illustration and project SVG drawings are distributed under MIT; no Streamline assets were copied or vendored.
 
-The interface takes visual direction from [Streamline Freehand](https://www.streamlinehq.com/icons/freehand-sets). The project's illustration and SVG icons do not copy Streamline assets.
+WeVote is licensed under the [MIT License](LICENSE). Retain its copyright and license notice when redistributing. Event posters and organizer logos supplied for a deployment retain their respective rights and permissions.

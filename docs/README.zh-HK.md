@@ -2,7 +2,11 @@
 
 低成本嘅活動投票工具：管理員開 event，分享同一條公開連結或 QR code，參加者直接投票。採用專業手繪介面，支援多個獨立活動、結果頁同報告匯出。
 
-呢份係香港廣東話使用指南。[English README](../README.md) · [部署到自己 Cloudflare 帳戶](DEPLOYMENT.md)。目前 repo 仍係私人，正準備公開；MIT 授權唔會自動更改 GitHub 可見性。
+**Project credits：[DAA.HK](https://daa.hk/), Hillman Tam and Keith Li。**
+
+**現有服務：[vote.daa.hk](https://vote.daa.hk/)**，寄存喺 Cloudflare Pages 同私有 API Worker。
+
+呢份係香港廣東話使用指南。[English README](../README.md) · [部署到自己 Cloudflare 帳戶](DEPLOYMENT.md)。源碼採用 MIT 授權；GitHub repo 目前係私人，由擁有人管理存取權限。
 
 ## 功能同頁面
 
@@ -105,6 +109,22 @@ npm run test:drafts -- http://localhost:8787
 
 登入 session 最長八小時；用完請登出。分享出去嘅 link／QR 只包含公開活動 ID，唔包含管理密鑰。正式使用統一 hostname，避免不同網域 cookie 各自獨立。
 
+### 活動海報同私人部署圖片
+
+特定活動嘅海報及主辦方圖片放喺已忽略嘅 `private-assets/`。喺 `private-assets/manifest.json` 列出要部署嘅圖片，例如：
+
+```json
+{ "version": 1, "files": ["event-poster.jpg"] }
+```
+
+將列出嘅圖片放喺同一個目錄，再明確啟用私人圖片部署：
+
+```bash
+npm run deploy:pages -- --with-private-assets
+```
+
+正常公開 build 包含項目通用插畫；加呢個 flag 先會將 manifest 列出嘅圖片加入寄存檔案。活動封面填返部署後嘅 HTTPS 圖片網址。Manifest 同圖片唔好提交到 Git；部署前要有圖片所需使用權，佢哋有各自嘅權利及授權。
+
 ## 可選：舊式獨立票據
 
 舊模式係一個以 secrets 設定嘅固定投票：`POLL_ID`、`POLL_QUESTION`、`POLL_OPTIONS_JSON`、`POLL_OPENS_AT`、`POLL_CLOSES_AT`，時間用 ISO 8601 UTC。票據會用 `VOTE_SIGNING_KEY` 簽名；開始派票後唔好更改該投票設定。
@@ -135,8 +155,12 @@ Durable Objects 另有請求、執行時間、SQLite 讀寫及儲存用量；KV 
 
 應用層儲存瀏覽器／票據 ID 嘅 hash、選項同時間；公開結果按活動設定顯示總票數及選項彙總，唔會公開逐票識別。管理員逐票 CSV 包含 hash 同時間，仍須限制存取及保存期。正式密鑰放 Cloudflare Secrets；HTTPS 同每個 hostname 嘅 cookie 各自獨立，所以正式派一個統一網域嘅連結。
 
-Credits: **[DAA.HK](https://daa.hk/), Hillman Tam and Keith Li**。
+## Credits、參考同授權
 
-本項目採用 [MIT License](../LICENSE)，第三方 QR 元件聲明見 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。已提供開源所需授權；GitHub repo 可見性仍由擁有人自行管理，授權檔案唔會自動將私人 repo 公開。
+WeVote 項目嘅 credits 按擁有人要求，列出 **[DAA.HK](https://daa.hk/), Hillman Tam and Keith Li**。以下再交代技術／設計參考及第三方程式嘅來源：
 
-介面參考 [Streamline Freehand](https://www.streamlinehq.com/icons/freehand-sets) 手繪方向；本項目插畫及 SVG 圖示冇複製 Streamline 圖示。
+- **技術靈感：**[Keith Li 嘅 HK Traffic Intelligence](https://github.com/keithligh/hk-traffic-intelligence) README 講解喺 Cloudflare 共用快取資料、副本按時間更新嘅方法，係 WeVote 重視共享快取同節省資源嘅參考。
+- **QR 元件：**Kazuhiko Arase 嘅 `qrcode-generator` 2.0.4 採用 MIT，完整第三方版權及授權聲明保留喺 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+- **視覺靈感：**[Streamline Freehand](https://www.streamlinehq.com/icons/freehand-sets) 提供手繪方向。本項目 AI 輔助插畫同原創 SVG 圖示採用 MIT，冇複製或打包 Streamline 圖示。
+
+本項目源碼採用 [MIT License](../LICENSE)，再分發時須保留版權及授權聲明。特定活動嘅海報、Logo 及其他供應圖片，使用權由各自權利人授權。

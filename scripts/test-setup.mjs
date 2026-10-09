@@ -118,7 +118,7 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "wrangler", c
   await writeFile(join(fixture, "scripts/build-pages.mjs"), `
 import { appendFileSync, mkdirSync } from "node:fs";
 mkdirSync("pages/dist", { recursive: true });
-appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd: process.cwd() }) + "\\n");
+appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd: process.cwd(), args: process.argv.slice(2) }) + "\\n");
 `);
   const productionSecrets = { ...secrets, TURNSTILE_SECRET_KEY: "fixture_secret_turnstile_key_2026" };
   const malformedMarker = "sensitive_fixture_value_not_for_error_output";
@@ -128,7 +128,7 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd:
   check(!`${malformed.stdout}${malformed.stderr}`.includes(malformedMarker), "Malformed secret JSON is not quoted in error output");
   check((await readTrace()).length === 0, "Malformed secret JSON invokes no child command");
   await writeJson(generated[2], productionSecrets);
-  for (const args of [["unknown"], ["pages", "--dry-run"], ["api", "--force"]]) await rejectDeploy(args, "Invalid deployment arguments are rejected");
+  for (const args of [["unknown"], ["pages", "--dry-run"], ["api", "--force"], ["api", "--with-private-assets"], ["pages", "--with-private-assets", "--with-private-assets"]]) await rejectDeploy(args, "Invalid deployment arguments are rejected");
   for (const badSecrets of [
     { ...productionSecrets, VOTE_SIGNING_KEY: "short" },
     { ...productionSecrets, ADMIN_EXPORT_KEY: productionSecrets.ADMIN_DASHBOARD_KEY },
@@ -169,11 +169,17 @@ appendFileSync(process.env.WEVOTE_TEST_LOG, JSON.stringify({ kind: "build", cwd:
   check(trace[0].cwd === fixture && trace[1].cwd === fixture && trace[2].cwd === join(fixture, ".cloudflare/pages"), "Children run beside their correct configuration files");
   check(trace[0].args.join("|") === "deploy|--config|wrangler.worker.local.jsonc|--secrets-file|.env.production.json|--dry-run|--outdir|.cloudflare/dry-run", "API deploy passes the secret file path and dry-run flags");
   check(trace[2].args.join("|") === "pages|deploy|--project-name|fixture-wevote|--branch|main", "Pages deploy uses its generated project configuration");
+  check(trace[1].args.length === 0, "Default Pages build does not include private assets");
   check(trace[0].account === worker.account_id, "API deployment overrides an inherited account with the configured account");
   check(trace[2].account === worker.account_id, "Pages deployment overrides an inherited account with the configured account");
   check(trace.filter((entry) => entry.kind === "wrangler").every((entry) => entry.metrics === "false"), "Wrangler telemetry is disabled");
   const invocationLog = JSON.stringify(trace);
   check([...privateKeys, productionSecrets.TURNSTILE_SECRET_KEY].every((value) => !invocationLog.includes(value)), "Private credentials never appear in command arguments");
+  check(run("deploy-cloudflare.mjs", ["pages", "--with-private-assets"]).status === 0, "Private-asset Pages deployment reaches only offline stubs");
+  const privateTrace = (await readTrace()).slice(trace.length);
+  check(privateTrace.length === 2 && privateTrace[0].kind === "build" && privateTrace[1].kind === "wrangler", "Private-asset build runs before deployment");
+  check(privateTrace[0].args.join("|") === "--with-private-assets", "Private-asset opt-in is passed to the build");
+  check(privateTrace[1].args.join("|") === trace[2].args.join("|"), "Private assets do not change the Pages destination");
   console.log(`Offline Cloudflare helper checks passed (${checks} assertions).`);
 } finally {
   await rm(fixture, { recursive: true, force: true });

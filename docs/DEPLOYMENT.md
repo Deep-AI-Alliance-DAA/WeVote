@@ -17,7 +17,7 @@ npm test
 npm run build:pages
 ```
 
-The tests use disposable local storage. They do not use an existing installation or Cloudflare login. Integration vote checks need outbound HTTPS to Cloudflare's public Turnstile test Siteverify endpoint; `test:setup`, `test:startup` and `test:cache` run offline. These checks verify functional behavior, permissions and caching; they are not a 50,000-user load test.
+The tests use disposable local storage. They do not use an existing installation or Cloudflare login. Integration vote checks need outbound HTTPS to Cloudflare's public Turnstile test Siteverify endpoint; `test:setup`, `test:startup`, `test:assets` and `test:cache` run offline. These checks verify functional behavior, permissions and caching; they are not a 50,000-user load test.
 
 ## 2. Select your account and create a KV namespace
 
@@ -89,6 +89,35 @@ npm run deploy:pages
 `--force` requests creation of a Pages project with the Wrangler version in this repository. For an existing Pages project, skip creation. `deploy:pages` builds the static site and `_worker.js`, then runs Pages deployment beside the generated Pages configuration. Pages deployment does not support `--config`; this helper selects the file by working directory. The deployment uses the production branch `main`. [Pages configuration](https://developers.cloudflare.com/pages/functions/wrangler-configuration/), [Pages advanced mode](https://developers.cloudflare.com/pages/functions/advanced-mode/)
 
 This is a Direct Upload workflow. The supplied GitHub Actions validate code and do not deploy it.
+
+### Updating an existing installation
+
+Keep your existing `wrangler.worker.local.jsonc`, `.cloudflare/pages/wrangler.jsonc` and `.env.production.json` when pulling source updates. Do not run first-time setup again or generate new signing/admin keys. If an older checkout used production IDs in the tracked Wrangler files, copy that deployment configuration into the ignored local files before replacing it with the shared templates. The Pages configuration lives two directories below the project root, so its schema and build paths must use `../../node_modules/wrangler/config-schema.json` and `../../pages/dist` respectively.
+
+Compare the account, Worker name, Pages name, KV namespace, service binding and all Durable Object bindings/migrations with the existing deployment. Keeping these identifiers preserves access to your existing events, accounts and votes. Run the dry run before deploying. A source update does not require recreating Cloudflare resources.
+
+### Event posters and private deployment assets
+
+Event-specific posters are not part of the source license. To keep an authorized poster available at an existing `/assets/...` URL, place it in the ignored `private-assets/` directory and explicitly list it in `private-assets/manifest.json`:
+
+```json
+{
+  "version": 1,
+  "files": ["event-poster.jpg"]
+}
+```
+
+Only local JPEG, PNG and WebP files with safe filenames are accepted. The build rejects missing files, symlinks, path traversal and invalid image signatures before replacing the current build. Files are published under `/assets/` and can be downloaded by visitors; this directory is private **in the source checkout**, not private on the website.
+
+```sh
+# Review the site bundle, including the listed poster(s).
+npm run build:pages -- --with-private-assets
+
+# Build and deploy the same assets to your configured Pages project.
+npm run deploy:pages -- --with-private-assets
+```
+
+For an installation whose events use these assets, include this flag on every Pages deployment. The default build/deploy excludes `private-assets/`, and a deployment without the flag removes those files from the site. Keep a separate backup of the assets and manifest; Git and the source release ZIP do not contain them. Other self-hosters can use their own artwork or an authorized external HTTPS cover URL through the admin editor.
 
 ## 5. Add a custom domain (optional)
 

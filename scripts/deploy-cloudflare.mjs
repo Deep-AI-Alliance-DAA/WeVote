@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const [target, ...options] = process.argv.slice(2);
-const dryRun = options.length === 1 && options[0] === "--dry-run";
-if (!["api", "pages"].includes(target) || (options.length && !dryRun) || (target === "pages" && dryRun)) {
-  console.error("Usage: node scripts/deploy-cloudflare.mjs api [--dry-run] | pages");
+const allowedOption = target === "api" ? "--dry-run" : "--with-private-assets";
+if (!["api", "pages"].includes(target) || options.length > 1 || (options.length && options[0] !== allowedOption)) {
+  console.error("Usage: node scripts/deploy-cloudflare.mjs api [--dry-run] | pages [--with-private-assets]");
   process.exit(1);
 }
+const dryRun = options.includes("--dry-run");
+const withPrivateAssets = options.includes("--with-private-assets");
 
 async function run(args, cwd = root, accountId) {
   const child = spawn(process.execPath, args, { cwd, stdio: "inherit", env: {
@@ -62,7 +64,7 @@ try {
     }
     await run([wrangler, "deploy", "--config", "wrangler.worker.local.jsonc", "--secrets-file", ".env.production.json", ...(dryRun ? ["--dry-run", "--outdir", ".cloudflare/dry-run"] : [])], root, worker.account_id);
   } else {
-    await run([resolve(root, "scripts/build-pages.mjs")]);
+    await run([resolve(root, "scripts/build-pages.mjs"), ...(withPrivateAssets ? ["--with-private-assets"] : [])]);
     // Pages deploy has no --config flag. Run beside our ignored Pages config.
     await run([wrangler, "pages", "deploy", "--project-name", pages.name, "--branch", "main"], resolve(root, ".cloudflare/pages"), worker.account_id);
   }
