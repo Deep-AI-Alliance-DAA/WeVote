@@ -103,7 +103,7 @@ Add the custom hostname to your Turnstile widget and update `vars.PUBLIC_BASE_UR
 3. Open its public link on another browser; verify Turnstile and submit one vote.
 4. Confirm results and charts update on the 3-second refresh cycle when result visibility permits it.
 5. Check the QR destination, CSV summary and print/PDF report.
-6. Close the disposable event and verify voting stops and authorized raw CSV export works.
+6. Wait until the disposable event's scheduled closing time, then verify voting stops and authorized raw CSV export works.
 7. Create organizer accounts and explicitly assign their events. Test their access before distributing keys.
 
 Results use a shared snapshot of approximately two seconds plus client polling and network delay. A successful vote need not appear on every dashboard instantly. Public results follow the event's visibility setting.
